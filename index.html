@@ -1,0 +1,568 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<title>Что купить</title>
+<meta name="description" content="Напишите, что готовите и на сколько человек — список покупок соберётся сам и разложится по отделам магазина.">
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src="data.js"></script>
+<style>
+:root {
+  --bg: var(--tg-theme-bg-color, #ffffff);
+  --bg2: var(--tg-theme-secondary-bg-color, #f3f4f1);
+  --text: var(--tg-theme-text-color, #1d1f1c);
+  --hint: var(--tg-theme-hint-color, #8a8f86);
+  --accent: var(--tg-theme-button-color, #2f9e55);
+  --accent-text: var(--tg-theme-button-text-color, #ffffff);
+  --link: var(--tg-theme-link-color, #2f9e55);
+  --line: color-mix(in srgb, var(--text) 10%, transparent);
+  --warn: #e8a13a;
+  --radius: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not(.tg) {
+    --bg: #161815; --bg2: #20231f; --text: #ecefe9; --hint: #8f968b; --accent: #43b86a; --link: #6fd08f;
+  }
+}
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { margin: 0; background: var(--bg2); color: var(--text);
+  font: 16px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+body { padding-bottom: calc(76px + env(safe-area-inset-bottom)); }
+button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; padding: 0; }
+input { font: inherit; color: var(--text); }
+.wrap { max-width: 560px; margin: 0 auto; padding: 12px 16px 24px; }
+h1 { font-size: 22px; margin: 6px 0 2px; letter-spacing: -.01em; }
+.sub { color: var(--hint); font-size: 14px; margin: 0 0 14px; }
+.card { background: var(--bg); border-radius: var(--radius); padding: 14px; margin-bottom: 12px; }
+.card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--hint); margin: 0 0 10px; font-weight: 600; }
+
+/* ввод блюд */
+.search { position: relative; }
+.search input { width: 100%; border: 1.5px solid var(--line); background: var(--bg2); border-radius: 12px;
+  padding: 12px 44px 12px 14px; outline: none; }
+.search input:focus { border-color: var(--accent); }
+.search .go { position: absolute; right: 6px; top: 6px; width: 34px; height: 34px; border-radius: 9px;
+  background: var(--accent); color: var(--accent-text); font-size: 20px; line-height: 34px; }
+.drop { position: absolute; left: 0; right: 0; top: calc(100% + 4px); background: var(--bg); border-radius: 12px;
+  box-shadow: 0 8px 28px rgba(0,0,0,.16); z-index: 5; overflow: hidden; }
+.drop button { display: block; width: 100%; text-align: left; padding: 11px 14px; border-bottom: 1px solid var(--line); }
+.drop button:last-child { border-bottom: 0; }
+.drop small { color: var(--hint); margin-left: 6px; }
+.people { display: flex; align-items: center; justify-content: space-between; margin-top: 12px; }
+.stepper { display: inline-flex; align-items: center; background: var(--bg2); border-radius: 10px; }
+.stepper button { width: 36px; height: 34px; font-size: 20px; color: var(--accent); }
+.stepper span { min-width: 28px; text-align: center; font-weight: 600; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { background: var(--bg2); border-radius: 999px; padding: 7px 12px; font-size: 14px; }
+.chip.on { background: var(--accent); color: var(--accent-text); }
+.chip.old { box-shadow: inset 0 0 0 1.5px var(--warn); }
+.chip .x { opacity: .6; margin-left: 4px; }
+.dish { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.dish:last-child { border-bottom: 0; }
+.dish .name { flex: 1; min-width: 0; }
+.dish .name small { display: block; color: var(--hint); font-size: 13px; }
+.dish .rm { color: var(--hint); font-size: 22px; width: 30px; height: 30px; }
+.empty { color: var(--hint); font-size: 14px; padding: 4px 0; }
+.primary { display: block; width: 100%; background: var(--accent); color: var(--accent-text); border-radius: 12px;
+  padding: 14px; font-weight: 600; text-align: center; }
+.ghost { color: var(--link); font-size: 14px; }
+.row { display: flex; gap: 10px; align-items: center; justify-content: space-between; }
+.note { font-size: 13px; color: var(--hint); margin-top: 8px; }
+
+/* список */
+.progress { height: 6px; background: var(--bg2); border-radius: 3px; overflow: hidden; margin-top: 8px; }
+.progress i { display: block; height: 100%; background: var(--accent); transition: width .25s; }
+.sec h2 { display: flex; justify-content: space-between; }
+.item { display: flex; gap: 12px; align-items: flex-start; padding: 11px 0; border-bottom: 1px solid var(--line); width: 100%; text-align: left; }
+.item:last-child { border-bottom: 0; }
+.box { flex: none; width: 24px; height: 24px; border-radius: 7px; border: 2px solid var(--line); margin-top: 1px;
+  display: grid; place-items: center; color: var(--accent-text); font-size: 15px; transition: .15s; }
+.item.done .box { background: var(--accent); border-color: var(--accent); }
+.item .t { flex: 1; min-width: 0; }
+.item .q { color: var(--text); opacity: .75; font-size: 14px; }
+.item .for { color: var(--hint); font-size: 12px; }
+.item.done .n, .item.done .q { text-decoration: line-through; opacity: .45; }
+.home-item { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--line); gap: 8px; }
+.home-item:last-child { border-bottom: 0; }
+.home-item button { color: var(--link); font-size: 14px; white-space: nowrap; }
+.add { display: flex; gap: 8px; }
+.add input { flex: 1; min-width: 0; border: 1.5px solid var(--line); background: var(--bg2); border-radius: 10px; padding: 10px 12px; outline: none; }
+.add button { background: var(--accent); color: var(--accent-text); border-radius: 10px; padding: 0 14px; font-weight: 600; }
+.order li { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 15px; }
+.order ol { margin: 0; padding-left: 20px; }
+.order button { width: 32px; height: 28px; color: var(--accent); }
+
+/* реклама */
+.ad { background: var(--bg); border-radius: var(--radius); padding: 12px 14px; margin-bottom: 12px; font-size: 14px; }
+.ad .lbl { font-size: 11px; color: var(--hint); text-transform: uppercase; letter-spacing: .05em; }
+.ad a { color: var(--link); text-decoration: none; font-weight: 600; }
+.ad:empty { display: none; }
+
+/* нижняя навигация */
+nav { position: fixed; left: 0; right: 0; bottom: 0; background: var(--bg); border-top: 1px solid var(--line);
+  display: flex; padding: 6px 8px calc(6px + env(safe-area-inset-bottom)); z-index: 10; }
+nav button { flex: 1; padding: 8px; border-radius: 10px; font-size: 13px; color: var(--hint); display: flex; flex-direction: column; align-items: center; gap: 2px; }
+nav button b { font-size: 20px; line-height: 1; }
+nav button.on { color: var(--accent); }
+.badge { background: var(--accent); color: var(--accent-text); border-radius: 999px; font-size: 11px; padding: 0 6px; margin-left: 4px; }
+.toast { position: fixed; left: 50%; bottom: 90px; transform: translateX(-50%); background: var(--text); color: var(--bg);
+  padding: 10px 16px; border-radius: 10px; font-size: 14px; opacity: 0; transition: .2s; pointer-events: none; z-index: 20; }
+.toast.show { opacity: .92; }
+[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <!-- ============ ЭКРАН: БЛЮДА ============ -->
+  <section id="scr-plan">
+    <h1>Что готовим?</h1>
+    <p class="sub">Напишите блюда — список покупок соберётся сам и разложится по отделам.</p>
+
+    <div class="card">
+      <div class="search">
+        <input id="q" placeholder="борщ на 6, плов, оливье…" autocomplete="off" enterkeyhint="done">
+        <button class="go" id="qgo" aria-label="Добавить">+</button>
+        <div class="drop" id="drop" hidden></div>
+      </div>
+      <div class="people">
+        <span>Сколько человек</span>
+        <span class="stepper"><button data-p="-1">−</button><span id="people">4</span><button data-p="1">+</button></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Меню</h2>
+      <div id="dishes"></div>
+    </div>
+
+    <div class="card">
+      <h2>Часто готовят</h2>
+      <div class="chips" id="popular"></div>
+    </div>
+
+    <div class="card">
+      <h2>По мелочи</h2>
+      <div class="chips" id="house"></div>
+      <p class="note" id="house-note"></p>
+    </div>
+
+    <button class="primary" id="build">Собрать список</button>
+  </section>
+
+  <!-- ============ ЭКРАН: СПИСОК ============ -->
+  <section id="scr-list" hidden>
+    <div class="row"><h1>Список</h1><button class="ghost" id="share">Поделиться</button></div>
+    <p class="sub" id="list-sub"></p>
+    <div class="progress"><i id="bar" style="width:0"></i></div>
+    <div style="height:12px"></div>
+
+    <div class="ad" id="ad-top"></div>
+    <div id="sections"></div>
+
+    <div class="card" id="home-card" hidden>
+      <h2>Проверьте дома</h2>
+      <div id="home"></div>
+    </div>
+
+    <div class="card" id="sug-card" hidden>
+      <h2>Может пригодиться</h2>
+      <div class="chips" id="sug"></div>
+    </div>
+
+    <div class="card">
+      <h2>Добавить своё</h2>
+      <div class="add"><input id="own" placeholder="например, корм коту"><button id="own-add">+</button></div>
+    </div>
+
+    <div class="ad" id="ad-bottom"></div>
+
+    <div class="row" style="margin:6px 2px 14px">
+      <button class="ghost" id="clear-done">Убрать купленное</button>
+      <button class="ghost" id="reset">Новый список</button>
+    </div>
+
+    <details class="card order">
+      <summary>Порядок отделов в вашем магазине</summary>
+      <p class="note">Поставьте отделы в том порядке, как вы их проходите, — список будет идти так же.</p>
+      <ol id="order"></ol>
+    </details>
+  </section>
+</div>
+
+<nav>
+  <button id="tab-plan" class="on"><b>🍲</b>Блюда</button>
+  <button id="tab-list"><b>🛒</b><span>Список<span class="badge" id="badge" hidden></span></span></button>
+</nav>
+<div class="toast" id="toast"></div>
+
+<script>
+/* ===================== НАСТРОЙКИ РЕКЛАМЫ =====================
+   adsgramBlockId  — блок Adsgram (adsgram.ai), показывается только внутри Telegram
+   yandexBlockId   — блок РСЯ (partner.yandex.ru), для открытия как обычный сайт
+   partner         — своя прямая реклама (местный магазин, доставка). В РФ нужна маркировка: erid + рекламодатель
+   interstitialEvery — полноэкранная реклама Adsgram на каждую N-ю сборку списка (0 — выключить)
+   ownerContact    — куда писать тем, кто хочет купить рекламу (показывается, пока слоты пустые) */
+const ADS = {
+  adsgramBlockId: "",
+  yandexBlockId: "",
+  partner: null, // { text: "Доставка продуктов за 30 минут — промокод ЕДА", url: "https://…", advertiser: "ООО …", erid: "…" }
+  interstitialEvery: 3,
+  ownerContact: "",  // например "@your_nick"
+};
+
+const tg = window.Telegram && Telegram.WebApp && Telegram.WebApp.initData ? Telegram.WebApp : null;
+if (tg) { document.documentElement.classList.add("tg"); tg.ready(); tg.expand(); }
+const haptic = t => { try { tg && tg.HapticFeedback.selectionChanged(); } catch (e) {} };
+
+/* ===================== ДАННЫЕ ===================== */
+const DB = window.DB;
+const CATS = DB.categories;
+const POPULAR = ["Борщ","Плов","Оливье","Шашлык","Блины","Котлеты","Картофельное пюре","Паста болоньезе","Цезарь","Курица в духовке","Селёдка под шубой","Пельмени","Сырники","Голубцы","Пицца","Шарлотка"];
+
+const norm = s => s.toLowerCase().replace(/ё/g, "е").replace(/[^\p{L}\p{N}\s-]/gu, " ").replace(/\s+/g, " ").trim();
+
+function lev(a, b) {
+  const m = a.length, n = b.length; if (!m || !n) return Math.max(m, n);
+  let prev = Array.from({length: n + 1}, (_, i) => i);
+  for (let i = 1; i <= m; i++) {
+    const cur = [i];
+    for (let j = 1; j <= n; j++) cur[j] = Math.min(prev[j] + 1, cur[j-1] + 1, prev[j-1] + (a[i-1] === b[j-1] ? 0 : 1));
+    prev = cur;
+  }
+  return prev[n];
+}
+function fuzzy(query, table, cutoff) {
+  const q = norm(query); if (!q) return null;
+  if (table[q]) return table[q];
+  for (const cut of [1, 2]) {
+    const stem = q.slice(0, -cut);
+    if (stem.length < 4 && !(cut === 1 && q.length === 4)) continue;
+    const hits = Object.keys(table).filter(k => k.startsWith(stem) && Math.abs(k.length - q.length) <= 3);
+    if (hits.length === 1) return table[hits[0]];
+  }
+  let best = null, score = 0;
+  for (const k of Object.keys(table)) {
+    if (Math.abs(k.length - q.length) > 4) continue;
+    const r = 1 - lev(q, k) / Math.max(q.length, k.length);
+    if (r > score) { score = r; best = k; }
+  }
+  return score >= cutoff ? table[best] : null;
+}
+function findDish(q) {
+  const hit = fuzzy(q, DB.dishAlias, 0.82); if (hit) return hit;
+  const w = norm(q).split(" ");
+  for (let n = w.length - 1; n > 0; n--) { const h = fuzzy(w.slice(0, n).join(" "), DB.dishAlias, 0.9); if (h) return h; }
+  return null;
+}
+const findProduct = q => fuzzy(q, DB.productAlias, 0.85);
+function searchDishes(q, limit = 7) {
+  q = norm(q); if (q.length < 2) return [];
+  const out = [];
+  for (const [alias, dish] of Object.entries(DB.dishAlias)) {
+    if ((alias.startsWith(q) || alias.includes(" " + q) || (q.length > 3 && alias.includes(q))) && !out.includes(dish)) out.push(dish);
+  }
+  return out.sort((a, b) => norm(a).startsWith(q) === norm(b).startsWith(q) ? 0 : norm(a).startsWith(q) ? -1 : 1).slice(0, limit);
+}
+
+const WORD_NUMS = {"одного":1,"одну":1,"двоих":2,"двое":2,"двух":2,"троих":3,"трое":3,"трех":3,"трёх":3,"четверых":4,"четверо":4,"четырех":4,"пятерых":5,"пятеро":5,"шестерых":6,"шестеро":6,"семерых":7,"семеро":7,"восьмерых":8,"девятерых":9,"десятерых":10,"десять":10,"дюжину":12};
+const NUM_RE = /(?:(?:^|\s)на\s+)?(\d+)\s*(?:человек\S*|чел\.?|порц\S*|персон\S*|гост\S*|шт\.?|штук\S*)?/i;
+/* «борщ на 6, плов и оливье на 8, туалетка» → { dishes, products, unknown } — та же логика, что в боте */
+function parseRequest(text, def) {
+  text = text.replace(/[А-Яа-яЁё]+/g, w => WORD_NUMS[w.toLowerCase()] ?? w);
+  const parts = [];
+  for (let ch of text.split(/[,;\n+]|\s+и\s+|\s+ещё\s+|\s+еще\s+/)) {
+    ch = ch.trim().replace(/^[\s.\-—:]+|[\s.\-—:]+$/g, ""); if (!ch) continue;
+    const m = ch.match(NUM_RE); const n = m ? +m[1] : null;
+    let name = m ? ch.replace(NUM_RE, " ") : ch;
+    name = norm(name.replace(/(^|\s)(хочу|приготовить|сделать|готовлю|буду|купить|нужно|надо|на)(?=\s|$)/gi, " "));
+    if (name) {
+      let kind = "unknown", val = name;
+      const d = findDish(name), p = d ? null : findProduct(name);
+      if (d) { kind = "dish"; val = d; }
+      else if (p) { kind = "product"; val = p; }
+      else {
+        const combo = name.split(/\s+со?\s+/).map(findDish);
+        if (combo.length > 1 && combo.every(Boolean)) { combo.forEach(c => parts.push({kind: "dish", val: c, n})); continue; }
+      }
+      parts.push({kind, val, n});
+    } else if (n && parts.length && parts[parts.length - 1].n == null) parts[parts.length - 1].n = n;
+  }
+  const res = {dishes: [], products: [], unknown: []};
+  let prev = null;
+  parts.forEach((p, i) => {
+    if (p.kind === "product") { res.products.push([p.val, p.n || 1]); return; }
+    const after = parts.slice(i + 1).find(x => x.kind !== "product" && x.n);
+    const guess = p.n || (after && after.n) || prev || def;
+    prev = p.n || prev;
+    (p.kind === "dish" ? res.dishes : res.unknown).push([p.val, guess]);
+  });
+  return res;
+}
+
+/* ===================== СОСТОЯНИЕ ===================== */
+const KEY = "shoplist.v1";
+const blank = () => ({ people: 4, dishes: [], manual: {}, fromHome: [], checked: {}, order: CATS.map((_, i) => i), history: {}, builds: 0, lastQ: "" });
+let S = blank();
+try { S = Object.assign(blank(), JSON.parse(localStorage.getItem(KEY) || "{}")); } catch (e) {}
+if (S.order.length !== CATS.length) S.order = CATS.map((_, i) => i);
+const save = () => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} };
+
+// своё, чего нет в каталоге — в «Прочее»
+const product = pid => DB.products[pid] || ["шт", 0, "", 0, CATS.length - 1];
+
+/* ===================== СБОРКА СПИСКА ===================== */
+function buildList() {
+  const buy = {}, home = {}, suggest = [];
+  for (const [dname, servings] of S.dishes) {
+    const d = DB.dishes[dname]; if (!d) continue;
+    const k = servings / d[0];
+    for (const [pid, q] of d[1]) {
+      const isHome = product(pid)[3] && !S.fromHome.includes(pid);
+      const t = isHome ? home : buy;
+      t[pid] ??= {pid, qty: 0, count: 0, dishes: []};
+      t[pid].qty += q * k;
+      if (!t[pid].dishes.includes(dname)) t[pid].dishes.push(dname);
+    }
+  }
+  for (const [pid, cnt] of Object.entries(S.manual)) {
+    buy[pid] ??= {pid, qty: 0, count: 0, dishes: []};
+    buy[pid].count += cnt;
+    delete home[pid];
+  }
+  const seen = new Set([...Object.keys(buy), ...Object.keys(home)]);
+  for (const [dname] of S.dishes) for (const pid of (DB.dishes[dname] || [])[2] || []) {
+    if (!seen.has(pid)) { suggest.push(pid); seen.add(pid); }
+  }
+  return {buy, home, suggest};
+}
+
+const FORMS = {"пучок":["пучок","пучка","пучков"],"зуб":["зубчик","зубчика","зубчиков"],"пакет":["пакет","пакета","пакетов"],"банка":["банка","банки","банок"],"бутылка":["бутылка","бутылки","бутылок"],"пачка":["пачка","пачки","пачек"],"десяток":["десяток","десятка","десятков"],"головка":["головка","головки","головок"],"пакетик":["пакетик","пакетика","пакетиков"],"плитка":["плитка","плитки","плиток"],"сырок":["сырок","сырка","сырков"],"бутыль":["бутыль","бутыли","бутылей"]};
+function plural(n, w) {
+  const f = FORMS[w]; if (!f) return w;
+  n = Math.abs(n) % 100; if (n > 10 && n < 20) return f[2];
+  return n % 10 === 1 ? f[0] : (n % 10 >= 2 && n % 10 <= 4) ? f[1] : f[2];
+}
+const fmtNum = x => (Math.round(x * 10) / 10).toString().replace(".", ",");
+function fmtAmount(q, unit) {
+  if (unit === "г") return q >= 1000 ? fmtNum(q / 1000) + " кг" : Math.round(q) + " г";
+  if (unit === "мл") return q >= 1000 ? fmtNum(q / 1000) + " л" : Math.round(q) + " мл";
+  const n = Math.ceil(q - 1e-9); return n + " " + plural(n, unit);
+}
+function fmtQty(line) {
+  const [unit, pack, label] = product(line.pid);
+  const parts = []; const q = line.qty;
+  if (q > 0) {
+    if (pack) {
+      const n = Math.max(1, Math.ceil(q / pack - 0.05));
+      parts.push(label === "десяток" || label === "головка"
+        ? `${n} ${plural(n, label)} · нужно ${fmtAmount(q, unit)}`
+        : `${n} ${plural(n, label)} по ${fmtAmount(pack, unit)} · нужно ${fmtAmount(q, unit)}`);
+    } else if (unit === "г" || unit === "мл") parts.push((unit === "г" ? "≈ " : "") + fmtAmount(Math.ceil(q / 50) * 50, unit));
+    else parts.push(fmtAmount(q, unit));
+  }
+  if (line.count) parts.push(q > 0 ? `+${line.count} шт` : `${line.count} шт`);
+  return parts.join(", ");
+}
+
+/* ===================== ОТРИСОВКА ===================== */
+const $ = id => document.getElementById(id);
+const cap = s => s ? s[0].toUpperCase() + s.slice(1) : s;
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+function toast(t) { const el = $("toast"); el.textContent = t; el.classList.add("show"); clearTimeout(toast.t); toast.t = setTimeout(() => el.classList.remove("show"), 1800); }
+
+function renderPlan() {
+  $("people").textContent = S.people;
+  $("dishes").innerHTML = S.dishes.length ? S.dishes.map(([name, n], i) => `
+    <div class="dish">
+      <div class="name">${esc(name)}<small>${esc((DB.dishes[name] || [])[3] || "")}</small></div>
+      <span class="stepper"><button data-d="${i}" data-s="-1">−</button><span>${n}</span><button data-d="${i}" data-s="1">+</button></span>
+      <button class="rm" data-rm="${i}" aria-label="Убрать">×</button>
+    </div>`).join("")
+    : `<div class="empty">Пока пусто. Напишите блюдо выше или выберите из популярных.</div>`;
+  const chosen = new Set(S.dishes.map(d => d[0]));
+  $("popular").innerHTML = POPULAR.filter(d => DB.dishes[d]).map(d => `<button class="chip ${chosen.has(d) ? "on" : ""}" data-pop="${esc(d)}">${esc(d)}</button>`).join("");
+  const now = Date.now(), old = [];
+  let groups = {};
+  DB.household.forEach(([g, pid, days]) => {
+    const last = S.history[pid];
+    const isOld = last && now - last > days * 864e5;
+    if (isOld) old.push(pid);
+    (groups[g] ??= []).push(`<button class="chip ${S.manual[pid] ? "on" : ""} ${isOld && !S.manual[pid] ? "old" : ""}" data-hh="${esc(pid)}">${esc(pid)}</button>`);
+  });
+  $("house").innerHTML = Object.values(groups).flat().join("");
+  $("house-note").textContent = old.length ? `Оранжевым — давно не покупали: ${old.slice(0, 4).join(", ")}${old.length > 4 ? "…" : ""}` : "Отмеченное в магазине запоминается — потом подскажу, что пора докупить.";
+}
+
+function renderList() {
+  const {buy, home, suggest} = buildList();
+  const byCat = {};
+  for (const line of Object.values(buy)) (byCat[product(line.pid)[4]] ??= []).push(line);
+  let total = 0, done = 0, html = "";
+  for (const ci of S.order) {
+    const lines = byCat[ci]; if (!lines) continue;
+    lines.sort((a, b) => (!!S.checked[a.pid] - !!S.checked[b.pid]) || a.pid.localeCompare(b.pid, "ru"));
+    const left = lines.filter(l => !S.checked[l.pid]).length;
+    total += lines.length; done += lines.length - left;
+    html += `<div class="card sec"><h2><span>${esc(CATS[ci])}</span><span>${left ? left : "✓"}</span></h2>` +
+      lines.map(l => {
+        const q = fmtQty(l);
+        return `<button class="item ${S.checked[l.pid] ? "done" : ""}" data-chk="${esc(l.pid)}">
+          <span class="box">${S.checked[l.pid] ? "✓" : ""}</span>
+          <span class="t"><span class="n">${esc(cap(l.pid))}</span>${q ? ` <span class="q">— ${esc(q)}</span>` : ""}
+          ${l.dishes.length ? `<div class="for">${esc(l.dishes.join(", "))}</div>` : ""}</span></button>`;
+      }).join("") + `</div>`;
+  }
+  $("sections").innerHTML = html || `<div class="card empty">Список пуст. Добавьте блюда на вкладке «Блюда».</div>`;
+  $("bar").style.width = total ? (done / total * 100) + "%" : "0";
+  $("list-sub").textContent = total ? `Куплено ${done} из ${total}` + (S.dishes.length ? ` · ${S.dishes.map(d => d[0] + " на " + d[1]).join(", ")}` : "") : "";
+  const b = $("badge"); b.hidden = !(total - done); b.textContent = total - done;
+
+  const homeLines = Object.values(home);
+  $("home-card").hidden = !homeLines.length;
+  $("home").innerHTML = homeLines.map(l => {
+    const [unit] = product(l.pid);
+    const amt = l.qty && (unit === "г" || unit === "мл") ? ` <span class="q">· ${fmtAmount(l.qty, unit)}</span>` : "";
+    return `<div class="home-item"><span>${esc(cap(l.pid))}${amt}</span><button data-nohome="${esc(l.pid)}">нет дома → в список</button></div>`;
+  }).join("");
+  $("sug-card").hidden = !suggest.length;
+  $("sug").innerHTML = suggest.map(pid => `<button class="chip" data-sug="${esc(pid)}">+ ${esc(pid)}</button>`).join("");
+  $("order").innerHTML = S.order.map((ci, i) => `<li><span>${esc(CATS[ci])}</span><span><button data-up="${i}">↑</button><button data-down="${i}">↓</button></span></li>`).join("");
+}
+
+function render() { renderPlan(); renderList(); save(); }
+
+/* ===================== ДЕЙСТВИЯ ===================== */
+function addText(text) {
+  const r = parseRequest(text, S.people);
+  const miss = [];
+  for (const [d, n] of r.dishes) {
+    const ex = S.dishes.find(x => x[0] === d);
+    ex ? (ex[1] = n) : S.dishes.push([d, n]);
+  }
+  for (const [pid, n] of r.products) S.manual[pid] = (S.manual[pid] || 0) + n;
+  for (const [name] of r.unknown) {
+    const opts = searchDishes(name);
+    if (opts.length) miss.push(`«${name}» — может, ${opts.slice(0, 3).join(", ")}?`);
+    else { S.manual[name] = (S.manual[name] || 0) + 1; }
+  }
+  if (miss.length) toast(miss[0]);
+  render();
+  return r;
+}
+
+function showTab(t) {
+  $("scr-plan").hidden = t !== "plan"; $("scr-list").hidden = t !== "list";
+  $("tab-plan").classList.toggle("on", t === "plan"); $("tab-list").classList.toggle("on", t === "list");
+  window.scrollTo(0, 0);
+}
+
+const q = $("q"), drop = $("drop");
+q.addEventListener("input", () => {
+  const last = q.value.split(/[,;]/).pop().replace(/\d+|\bна\b/g, "").trim();
+  const opts = searchDishes(last);
+  drop.hidden = !opts.length || !last;
+  drop.innerHTML = opts.map(d => `<button data-pick="${esc(d)}">${esc(d)}<small>${esc(DB.dishes[d][3])}</small></button>`).join("");
+});
+q.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); submitQ(); } });
+$("qgo").onclick = submitQ;
+function submitQ() { if (!q.value.trim()) return; addText(q.value); q.value = ""; drop.hidden = true; q.blur(); }
+document.addEventListener("click", e => { if (!e.target.closest(".search")) drop.hidden = true; });
+
+document.body.addEventListener("click", e => {
+  const el = e.target.closest("button"); if (!el) return;
+  const d = el.dataset;
+  if (d.pick) {
+    const parts = q.value.split(/[,;]/); parts.pop();
+    addText([d.pick].join("")); q.value = parts.length ? parts.join(",") + ", " : ""; drop.hidden = true; q.focus();
+  } else if (d.p) { S.people = Math.max(1, Math.min(50, S.people + +d.p)); render(); }
+  else if (d.s) { const x = S.dishes[+d.d]; x[1] = Math.max(1, Math.min(100, x[1] + +d.s)); render(); }
+  else if (d.rm) { S.dishes.splice(+d.rm, 1); render(); }
+  else if (d.pop) {
+    const i = S.dishes.findIndex(x => x[0] === d.pop);
+    i >= 0 ? S.dishes.splice(i, 1) : S.dishes.push([d.pop, S.people]); haptic(); render();
+  }
+  else if (d.hh) { S.manual[d.hh] ? delete S.manual[d.hh] : (S.manual[d.hh] = 1); haptic(); render(); }
+  else if (d.chk) {
+    S.checked[d.chk] = !S.checked[d.chk];
+    if (S.checked[d.chk]) S.history[d.chk] = Date.now();
+    haptic(); render();
+  }
+  else if (d.nohome) { S.fromHome.push(d.nohome); render(); }
+  else if (d.sug) { S.manual[d.sug] = (S.manual[d.sug] || 0) + 1; render(); }
+  else if (d.up || d.down) {
+    const i = +(d.up ?? d.down), j = d.up ? i - 1 : i + 1;
+    if (j >= 0 && j < S.order.length) { [S.order[i], S.order[j]] = [S.order[j], S.order[i]]; render(); }
+  }
+});
+
+$("tab-plan").onclick = () => showTab("plan");
+$("tab-list").onclick = () => showTab("list");
+$("build").onclick = () => {
+  if (!S.dishes.length && !Object.keys(S.manual).length) { toast("Добавьте хоть одно блюдо"); return; }
+  S.builds++; save(); showTab("list"); maybeInterstitial();
+};
+$("own-add").onclick = () => { const v = $("own").value.trim(); if (!v) return; addText(v); $("own").value = ""; };
+$("own").addEventListener("keydown", e => { if (e.key === "Enter") $("own-add").click(); });
+$("clear-done").onclick = () => {
+  for (const pid of Object.keys(S.checked)) if (S.checked[pid]) { delete S.manual[pid]; }
+  const {buy} = buildList();
+  // блюдные строки остаются отмеченными, ручные — удаляются
+  S.checked = Object.fromEntries(Object.entries(S.checked).filter(([pid, v]) => v && buy[pid]));
+  render();
+};
+$("reset").onclick = () => {
+  const go = () => { Object.assign(S, {dishes: [], manual: {}, fromHome: [], checked: {}}); render(); showTab("plan"); };
+  tg && tg.showConfirm ? tg.showConfirm("Начать новый список?", ok => ok && go()) : (confirm("Начать новый список?") && go());
+};
+$("share").onclick = () => {
+  const {buy} = buildList();
+  const byCat = {};
+  for (const l of Object.values(buy)) if (!S.checked[l.pid]) (byCat[product(l.pid)[4]] ??= []).push(l);
+  let text = "Список покупок\n";
+  for (const ci of S.order) if (byCat[ci]) text += `\n${CATS[ci]}:\n` + byCat[ci].map(l => `— ${l.pid}${fmtQty(l) ? " (" + fmtQty(l).replace(/ · нужно.*$/, "") + ")" : ""}`).join("\n") + "\n";
+  if (tg) tg.openTelegramLink("https://t.me/share/url?url=" + encodeURIComponent(" ") + "&text=" + encodeURIComponent(text));
+  else if (navigator.share) navigator.share({text}).catch(() => {});
+  else navigator.clipboard.writeText(text).then(() => toast("Скопировано"));
+};
+
+/* ===================== РЕКЛАМА ===================== */
+function loadScript(src) { return new Promise((ok, fail) => { const s = document.createElement("script"); s.src = src; s.async = true; s.onload = ok; s.onerror = fail; document.head.appendChild(s); }); }
+function renderAds() {
+  const slots = [$("ad-top"), $("ad-bottom")];
+  if (ADS.partner && ADS.partner.text) {
+    const p = ADS.partner;
+    slots[0].innerHTML = `<div class="lbl">Реклама${p.advertiser ? " · " + esc(p.advertiser) : ""}${p.erid ? " · erid: " + esc(p.erid) : ""}</div>` +
+      (p.url ? `<a href="${esc(p.url)}" target="_blank" rel="noopener sponsored">${esc(p.text)}</a>` : esc(p.text));
+  } else if (ADS.ownerContact) {
+    slots[0].innerHTML = `<div class="lbl">Место для рекламы</div>Ваш магазин или доставка здесь — пишите ${esc(ADS.ownerContact)}`;
+  }
+  if (ADS.yandexBlockId && !tg) {
+    slots[1].innerHTML = `<div id="yandex_rtb_${esc(ADS.yandexBlockId)}"></div>`;
+    window.yaContextCb = window.yaContextCb || [];
+    window.yaContextCb.push(() => Ya.Context.AdvManager.render({blockId: ADS.yandexBlockId, renderTo: "yandex_rtb_" + ADS.yandexBlockId}));
+    loadScript("https://yandex.ru/ads/system/context.js").catch(() => {});
+  }
+}
+let adsgram = null;
+async function maybeInterstitial() {
+  if (!tg || !ADS.adsgramBlockId || !ADS.interstitialEvery || S.builds % ADS.interstitialEvery) return;
+  try {
+    if (!window.Adsgram) await loadScript("https://sad.adsgram.ai/js/sad.min.js");
+    adsgram ??= window.Adsgram.init({blockId: ADS.adsgramBlockId});
+    await adsgram.show();
+  } catch (e) { /* реклама не загрузилась — не мешаем пользоваться */ }
+}
+
+/* ===================== СТАРТ ===================== */
+const incoming = new URLSearchParams(location.search).get("q");
+if (incoming && incoming !== S.lastQ) {  // пришли из бота с готовым запросом
+  Object.assign(S, {dishes: [], manual: {}, fromHome: [], checked: {}, lastQ: incoming});
+  addText(incoming);
+  showTab("list");
+}
+renderAds();
+render();
+</script>
+</body>
+</html>
