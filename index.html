@@ -105,6 +105,13 @@ details.grp[open] summary::after { transform: rotate(-90deg); }
 .item.done .box { background: var(--accent); border-color: var(--accent); }
 .item .t { flex: 1; min-width: 0; }
 .item .q { opacity: .72; font-size: 14px; }
+.item .n { text-align: left; }
+.item .qbtn { font-size: 14px; color: var(--text); opacity: .75; text-align: left; border-bottom: 1px dashed var(--line); }
+.item .qbtn.set { color: var(--link); opacity: 1; }
+.item .qbtn.ask { color: var(--link); opacity: .9; font-size: 13px; }
+.qty-in { font-size: 30px; font-weight: 700; text-align: center; width: 120px; border: 0; background: transparent; outline: none; }
+.qty-row { display: flex; align-items: center; justify-content: center; gap: 12px; margin: 6px 0 12px; }
+.qty-row .stepper button { width: 48px; height: 48px; font-size: 26px; }
 .item .for { color: var(--hint); font-size: 12px; }
 .item.done .n, .item.done .q { text-decoration: line-through; opacity: .5; }
 .price { flex: none; font-size: 13px; color: var(--hint); padding: 3px 0 3px 6px; white-space: nowrap; }
@@ -275,7 +282,7 @@ const KEY = "shoplist.v1";
 const blank = () => ({
   v: 3, onboarded: false, people: 4, prefs: {diets: [], fish: false}, theme: "auto", showPrices: true, autoFridge: true,
   dishes: [], manual: {}, fromHome: [], checked: {}, order: CATS.map((_, i) => i), history: {},
-  trips: [], myPrices: {}, custom: {}, customProducts: {}, fridge: {}, bought: {}, lastQ: "", lastShare: "",
+  trips: [], myPrices: {}, custom: {}, customProducts: {}, fridge: {}, bought: {}, amount: {}, lastQ: "", lastShare: "",
 });
 let S = blank();
 try { S = Object.assign(blank(), JSON.parse(localStorage.getItem(KEY) || "{}")); } catch (e) {}
@@ -360,28 +367,52 @@ function searchProducts(q, limit = 30) {
   return out.sort((a, b) => norm(b).startsWith(q) - norm(a).startsWith(q)).slice(0, limit);
 }
 const WORD_NUMS = {"одного":1,"одну":1,"двоих":2,"двое":2,"двух":2,"троих":3,"трое":3,"трех":3,"трёх":3,"четверых":4,"четверо":4,"четырех":4,"пятерых":5,"пятеро":5,"шестерых":6,"шестеро":6,"семерых":7,"семеро":7,"восьмерых":8,"девятерых":9,"десятерых":10,"десять":10,"дюжину":12};
-const NUM_RE = /(?:(?:^|\s)на\s+)?(\d+)\s*(?:человек\S*|чел\.?|порц\S*|персон\S*|гост\S*|шт\.?|штук\S*)?/i;
+// число и необязательная единица: «на 6 человек», «2 кг», «500 г», «2 банки», «1,5 л»
+const UNIT_WORDS = "кг|килограмм[а-яё]*|кило|г|гр|грамм[а-яё]*|л|литр[а-яё]*|мл|миллилитр[а-яё]*|шт\\.?|штук[а-яё]*|уп\\.?|упаковк[а-яё]*|пач[а-яё]*|бан[а-яё]*|бутыл[а-яё]*|пакет[а-яё]*|десят[а-яё]*|головк[а-яё]*|пуч[а-яё]*|человек[а-яё]*|чел\\.?|порц[а-яё]*|персон[а-яё]*|гост[а-яё]*";
+const NUM_RE = new RegExp(`(?:(?:^|\\s)на\\s+)?(\\d+(?:[.,]\\d+)?)\\s*(${UNIT_WORDS})?(?![а-яё])`, "i");
+const PEOPLE_UNITS = /^(человек|чел|порц|персон|гост)/i;
+const HALVES = [[/полкило/gi, "0.5 кг"], [/пол\s*литра/gi, "0.5 л"], [/пол\s*кг/gi, "0.5 кг"]];
+/* сколько продукта в единицах каталога: {qty} или {count} (штук/упаковок, если единица к товару не подходит) */
+function toBase(pid, n, unit) {
+  const [pu, pack] = product(pid), u = (unit || "").toLowerCase().replace(/\.$/, ""), weight = pu === "г" || pu === "мл";
+  const cnt = {qty: 0, count: Math.max(1, Math.round(n))};
+  if (/^(кг|кило)/.test(u)) return weight ? {qty: n * 1000, count: 0} : cnt;
+  if (u === "г" || u === "гр" || u.startsWith("грамм") || u === "мл" || u.startsWith("миллилитр")) return weight ? {qty: n, count: 0} : cnt;
+  if (u === "л" || u.startsWith("литр")) return weight ? {qty: n * 1000, count: 0} : cnt;
+  if (/^(уп|пач|бан|бутыл|пакет|десят|головк)/.test(u)) return pack ? {qty: n * pack, count: 0} : cnt;
+  if (u.startsWith("пуч")) return pu === "пучок" ? {qty: n, count: 0} : cnt;
+  if (!u || /^шт/.test(u)) {
+    if (["шт", "пучок", "зуб"].includes(pu)) return {qty: n, count: 0};          // «яйца 20», «лимон 3»
+    if (!u && pack) return {qty: n * pack, count: 0};                              // «молоко 2» — две упаковки
+    if (!u && weight) return {qty: n <= 20 ? n * 1000 : n, count: 0};              // «картошка 3» — кг, «фарш 500» — г
+  }
+  return cnt;
+}
 function parseRequest(text, def) {
+  for (const [re, to] of HALVES) text = text.replace(re, to);
   text = text.replace(/[А-Яа-яЁё]+/g, w => WORD_NUMS[w.toLowerCase()] ?? w);
   const parts = [];
-  for (let ch of text.split(/[,;\n+]|\s+и\s+|\s+ещё\s+|\s+еще\s+/)) {
+  for (let ch of text.split(/(?<!\d),|,(?!\d)|[;\n+]|\s+и\s+|\s+ещё\s+|\s+еще\s+/)) {  // «1,5 кг» не режем
     ch = ch.trim().replace(/^[\s.\-—:]+|[\s.\-—:]+$/g, ""); if (!ch) continue;
-    const m = ch.match(NUM_RE); const n = m ? +m[1] : null;
-    let name = m ? ch.replace(NUM_RE, " ") : ch;
+    const m = ch.match(NUM_RE); const n = m ? +m[1].replace(",", ".") : null, unit = m ? m[2] : null;
+    let name = m ? ch.slice(0, m.index) + " " + ch.slice(m.index + m[0].length) : ch;
     name = norm(name.replace(/(^|\s)(хочу|приготовить|сделать|готовлю|буду|купить|нужно|надо|на)(?=\s|$)/gi, " "));
-    if (!name) { if (n && parts.length && parts[parts.length - 1].n == null) parts[parts.length - 1].n = n; continue; }
+    if (!name) { if (n && parts.length && parts[parts.length - 1].n == null) Object.assign(parts[parts.length - 1], {n, unit}); continue; }
+    // «полкило сыра», «2 банки сметаны» — с весом или упаковкой это продукт, а не блюдо
+    if (unit && !PEOPLE_UNITS.test(unit)) { const p = findProduct(name); if (p) { parts.push({kind: "product", val: p, n, unit}); continue; } }
     const halves = name.split(/\s+со?\s+/);
     const exact = fuzzy(name, DB.dishAlias, 0.82);
     const combo = !exact && halves.length > 1 ? halves.map(findDish) : [];
     if (combo.length && combo.every(Boolean)) { combo.forEach((d, i) => parts.push({kind: "dish", val: [d, detectVariant(d, halves[i])], n})); continue; }
     const d = exact || findDish(name);
     if (d) parts.push({kind: "dish", val: [d, detectVariant(d, name)], n});
-    else { const p = findProduct(name); parts.push(p ? {kind: "product", val: p, n} : {kind: "unknown", val: name, n}); }
+    else { const p = findProduct(name); parts.push(p ? {kind: "product", val: p, n, unit} : {kind: "unknown", val: name, n}); }
   }
   const res = {dishes: [], products: [], unknown: []};
   let prev = null;
   parts.forEach((p, i) => {
-    if (p.kind === "product") { res.products.push([p.val, p.n || 1]); return; }
+    if (p.kind === "product") { const b = p.n ? toBase(p.val, p.n, p.unit) : {qty: 0, count: 1}; res.products.push([p.val, b.count, b.qty]); return; }
+    if (p.n) p.n = Math.round(p.n);
     const after = parts.slice(i + 1).find(x => x.kind !== "product" && x.n);
     const guess = p.n || (after && after.n) || prev || def;
     prev = p.n || prev;
@@ -469,6 +500,10 @@ function buildList(dishes = S.dishes, manual = S.manual, fromHome = S.fromHome) 
     buy[pid] ??= {pid, qty: 0, count: 0, dishes: []};
     buy[pid].count += cnt; delete home[pid];
   }
+  for (const [pid, q] of Object.entries(S.amount)) {  // «сколько купить», заданное вручную
+    if (!buy[pid]) continue;
+    buy[pid].recipe = buy[pid].qty; buy[pid].qty = q; buy[pid].count = 0; buy[pid].set = true;
+  }
   const seen = new Set([...Object.keys(buy), ...Object.keys(home)]);
   for (const [name] of dishes) for (const pid of (dish(name) || [])[2] || []) {
     if (!seen.has(pid) && !isBad(pid, f) && !S.fridge[pid]) { suggest.push(pid); seen.add(pid); }
@@ -513,10 +548,11 @@ let tab = "list";
 function itemHtml(l) {
   const q = fmtQty(l), done = !!S.checked[l.pid], c = lineCost(l);
   const price = S.showPrices ? `<button class="price ${S.myPrices[l.pid] != null ? "mine" : ""}" data-a="price" data-x="${esc(l.pid)}">${c ? "≈ " + rub(c) : "цена?"}</button>` : "";
-  return `<div class="item ${done ? "done" : ""}"><button class="tap" data-a="check" data-x="${esc(l.pid)}">
-    <span class="box">${done ? "✓" : ""}</span>
-    <span class="t"><span class="n">${esc(cap(l.pid))}</span>${q ? ` <span class="q">— ${esc(q)}</span>` : ""}
-    ${l.dishes.length ? `<div class="for">${esc(l.dishes.join(", "))}</div>` : ""}</span></button>${price}</div>`;
+  const qb = q ? `<button class="qbtn ${l.set ? "set" : ""}" data-a="qty" data-x="${esc(l.pid)}">${esc(q)}</button>`
+    : done ? "" : `<button class="qbtn ask" data-a="qty" data-x="${esc(l.pid)}">сколько?</button>`;
+  return `<div class="item ${done ? "done" : ""}"><button class="box" data-a="check" data-x="${esc(l.pid)}" aria-label="Купил">${done ? "✓" : ""}</button>
+    <div class="t"><button class="n" data-a="check" data-x="${esc(l.pid)}">${esc(cap(l.pid))}</button> ${qb}
+    ${l.dishes.length ? `<div class="for">${esc(l.dishes.join(", "))}</div>` : ""}</div>${price}</div>`;
 }
 function renderList() {
   const {buy, home, suggest, total} = buildList();
@@ -684,7 +720,8 @@ function renderAddResults() {
     }
   } else {
     const isOn = pid => fr ? !!S.fridge[pid] : !!S.manual[pid];
-    const chip = pid => `<button class="chip ${isOn(pid) ? "on" : ""}" data-a="addProd" data-x="${esc(pid)}">${isOn(pid) ? "✓ " : ""}${esc(cap(pid))}</button>`;
+    const amt = pid => !fr && S.amount[pid] ? " · " + amountText(pid, S.amount[pid]) : "";
+    const chip = pid => `<button class="chip ${isOn(pid) ? "on" : ""}" data-a="addProd" data-x="${esc(pid)}">${isOn(pid) ? "✓ " : ""}${esc(cap(pid))}${amt(pid)}</button>`;
     if (q) {
       const found = searchProducts(q);
       const exact = found.some(p => norm(p) === norm(q));
@@ -887,6 +924,57 @@ function renderOnb() {
 function showOnb() { onbStep = 0; $("onb").hidden = false; renderOnb(); updateMain(); }
 function finishOnb() { S.onboarded = true; $("onb").hidden = true; S.dishes.forEach(x => { x[2] = fit(x[0]).v || x[2]; }); save(); render(); }
 
+/* ===================== СКОЛЬКО КУПИТЬ ===================== */
+/* единицы, подходящие товару: [название, сколько это в единицах каталога] */
+function unitOptions(pid) {
+  const [unit, pack, label] = product(pid), o = [];
+  if (unit === "г") o.push(["кг", 1000], ["г", 1]);
+  else if (unit === "мл") o.push(["л", 1000], ["мл", 1]);
+  else o.push([unit === "зуб" ? "зубчиков" : unit, 1]);
+  if (pack) o.push([label === "уп." ? "упаковок" : plural(5, label), pack]);
+  return o;
+}
+const qtyStep = f => f === 1000 ? 0.5 : f === 1 && unitIsWeight ? 100 : 1;
+let unitIsWeight = false;
+const roundNice = x => Math.round(x * 100) / 100;
+function amountText(pid, q) {
+  const [unit, pack, label] = product(pid);
+  if (unit === "г" || unit === "мл") return fmtAmount(q, unit);
+  if (pack && q % pack === 0 && label !== "уп.") return `${q / pack} ${plural(q / pack, label)}`;
+  return fmtAmount(q, unit);
+}
+let qd = null;  // {pid, u — индекс единицы, val}
+function openQty(pid) {
+  const o = unitOptions(pid), [unit, pack] = product(pid), line = buildList().buy[pid];
+  const cur = S.amount[pid] ?? (line && line.qty) ?? 0;
+  // по умолчанию: развес — кг/л, фасованное — упаковки, штучное — штуки
+  let u = 0;
+  if ((unit === "г" || unit === "мл" || product(pid)[2] === "головка") && pack) u = o.length - 1;
+  if ((unit === "г" || unit === "мл") && !pack && cur && cur < 1000) u = 1;
+  const val = cur ? roundNice(cur / o[u][1]) : (o[u][1] === 1000 ? 1 : 1);
+  qd = {pid, u, val: pack && u === o.length - 1 && cur ? Math.max(1, Math.ceil(cur / pack - 0.05)) : val, recipe: line && line.dishes.length ? (line.recipe ?? line.qty) : 0};
+  $("mini").hidden = false; renderQty();
+}
+function readQty() { const el = $("qty-in"); return el ? parseFloat(el.value.replace(",", ".")) || 0 : qd.val; }
+function renderQty() {
+  const {pid, u, val, recipe} = qd, o = unitOptions(pid), f = o[u][1], [unit] = product(pid);
+  unitIsWeight = unit === "г" || unit === "мл";
+  const presets = f === 1000 ? [0.5, 1, 1.5, 2, 3] : f === 1 && unitIsWeight ? [100, 200, 300, 500] : f > 1 ? [1, 2, 3, 4] : [1, 2, 3, 5, 10];
+  const manualOnly = !(buildList().buy[pid] || {dishes: []}).dishes.length;
+  $("mini-panel").innerHTML = `<div class="in" style="padding-bottom:4px">
+    <h1 style="font-size:20px">${esc(cap(pid))}</h1>
+    <p class="sub" style="margin-bottom:6px">${recipe ? `По рецептам нужно ${esc(fmtAmount(recipe, unit))}. Сколько купить?` : "Сколько купить?"}</p>
+    <div class="qty-row"><span class="stepper"><button data-a="qStep" data-x="-1">−</button></span>
+      <input class="qty-in" id="qty-in" inputmode="decimal" value="${String(val).replace(".", ",")}">
+      <span class="stepper"><button data-a="qStep" data-x="1">+</button></span></div>
+    ${o.length > 1 ? `<div class="seg" style="margin-bottom:10px">${o.map(([t], i) => `<button class="${i === u ? "on" : ""}" data-a="qUnit" data-x="${i}">${esc(t)}</button>`).join("")}</div>` : `<p class="muted" style="text-align:center;margin:0 0 10px">${esc(o[0][0])}</p>`}
+    <div class="chips" style="justify-content:center;margin-bottom:14px">${presets.map(x => `<button class="chip ${x === val ? "on" : ""}" data-a="qPreset" data-x="${x}">${String(x).replace(".", ",")}</button>`).join("")}</div>
+    <button class="primary" data-a="qSave">Готово</button>
+    <div class="row" style="margin:12px 0 4px">${S.amount[pid] != null ? `<button class="ghost" data-a="qClear">${recipe ? "Как в рецепте" : "Без количества"}</button>` : "<span></span>"}
+      ${manualOnly ? `<button class="ghost danger" data-a="qRemove">Убрать из списка</button>` : `<button class="ghost" data-a="closeMini">Отмена</button>`}</div></div>`;
+}
+function afterQty() { save(); if (sheet && sheet.kind === "add") renderAddResults(); else render(); }
+
 /* ===================== СВОЯ ЦЕНА ===================== */
 function openPrice(pid) {
   $("mini").hidden = false;
@@ -941,7 +1029,7 @@ function cloudSave() {
   try {
     const custom = {}; for (const [k, v] of Object.entries(S.custom)) custom[k] = {...v, photo: ""};
     const s = JSON.stringify({people: S.people, prefs: S.prefs, theme: S.theme, showPrices: S.showPrices, autoFridge: S.autoFridge, order: S.order, myPrices: S.myPrices,
-      custom, customProducts: S.customProducts, trips: S.trips.slice(0, 15), history: S.history, fridge: S.fridge,
+      custom, customProducts: S.customProducts, trips: S.trips.slice(0, 15), history: S.history, fridge: S.fridge, amount: S.amount,
       dishes: S.dishes, manual: S.manual, onboarded: S.onboarded});
     const n = Math.ceil(s.length / 3800);
     for (let i = 0; i < n; i++) cloud.setItem("b" + i, s.slice(i * 3800, (i + 1) * 3800));
@@ -979,6 +1067,7 @@ function packList(withSteps = true) {
   }
   const o = {d: S.dishes.map(([name, n, v]) => [DB.dishes[name] ? DB.dishes[name][7] : name, n, v]),
     m: Object.entries(S.manual).map(([p, n]) => [pkey(p), n]), h: S.fromHome.map(pkey)};
+  if (Object.keys(S.amount).length) o.a = Object.entries(S.amount).map(([p, q]) => [pkey(p), q]);
   if (Object.keys(c).length) o.c = c;
   return "L" + b64u(JSON.stringify(o));
 }
@@ -1034,8 +1123,10 @@ function importShared(code) {
     const dishes = (o.d || []).map(([k, n, v]) => [typeof k === "number" ? DISH_BY_ID[k] : k, n, v || 0]).filter(([name]) => name && dish(name));
     const manual = {};
     for (const [k, n] of o.m || []) { const pid = typeof k === "number" ? PROD_BY_ID[k] : k; if (pid) manual[pid] = n; }
+    const amount = {};
+    for (const [k, q] of o.a || []) { const pid = typeof k === "number" ? PROD_BY_ID[k] : k; if (pid) amount[pid] = q; }
     const fromHome = (o.h || []).map(k => typeof k === "number" ? PROD_BY_ID[k] : k).filter(Boolean);
-    Object.assign(S, {dishes, manual, fromHome, checked: {}, bought: {}, lastShare: code});
+    Object.assign(S, {dishes, manual, fromHome, amount, checked: {}, bought: {}, lastShare: code});
     showTab("list"); toast("Список получен — можно идти в магазин 🛒");
   };
   if (S.dishes.length || Object.keys(S.manual).length) confirmBox("Вам прислали список покупок. Заменить им текущий?", go); else go();
@@ -1050,7 +1141,11 @@ function addText(text) {
     const i = inList(d);
     i >= 0 ? (S.dishes[i][1] = n, S.dishes[i][2] = vv) : S.dishes.push([d, n, vv]);
   }
-  for (const [pid, n] of r.products) { S.manual[pid] = (S.manual[pid] || 0) + n; S.fromHome = S.fromHome.filter(x => x !== pid); delete S.bought[pid]; }
+  for (const [pid, n, q] of r.products) {
+    if (q) { S.amount[pid] = q; if (!(buildList().buy[pid] || {dishes: []}).dishes.length) S.manual[pid] = S.manual[pid] || 1; }  // «молоко 2 л» — ровно столько
+    else S.manual[pid] = (S.manual[pid] || 0) + n;
+    S.fromHome = S.fromHome.filter(x => x !== pid); delete S.bought[pid];
+  }
   for (const [name] of r.unknown) {
     const opts = searchDishes(name);
     if (opts.length) miss.push(`«${name}» — может, ${opts.slice(0, 3).join(", ")}?`);
@@ -1070,15 +1165,15 @@ function finishTrip() {
     S.history[l.pid] = now;
     if (S.autoFridge && !NOT_FOOD.has(CATS[product(l.pid)[4]])) S.fridge[l.pid] = now;
   }
-  S.trips.unshift({t: now, dishes: S.dishes.map(d => [...d]), manual: {...S.manual},
+  S.trips.unshift({t: now, dishes: S.dishes.map(d => [...d]), manual: {...S.manual}, amount: {...S.amount},
     items: bought.map(l => [l.pid, fmtQty(l).replace(/ · нужно.*$/, ""), Math.round(lineCost(l))]),
     total: Math.round(bought.reduce((s, l) => s + lineCost(l), 0))});
   S.trips = S.trips.slice(0, 60);
   // что не купили — остаётся в списке: блюда на месте, купленное из них больше не показываем
   const left = lines.filter(l => !S.checked[l.pid]);
-  if (!left.length) Object.assign(S, {dishes: [], manual: {}, fromHome: [], checked: {}, bought: {}});
+  if (!left.length) Object.assign(S, {dishes: [], manual: {}, fromHome: [], checked: {}, bought: {}, amount: {}});
   else {
-    for (const l of bought) { S.bought[l.pid] = true; delete S.manual[l.pid]; }
+    for (const l of bought) { S.bought[l.pid] = true; delete S.manual[l.pid]; delete S.amount[l.pid]; }
     S.checked = {};
   }
   render();
@@ -1109,8 +1204,20 @@ const ACT = {
   },
   addProd: el => { const p = el.dataset.x;
     if (sheet.target === "fridge") S.fridge[p] ? delete S.fridge[p] : (S.fridge[p] = Date.now());
-    else { S.manual[p] ? delete S.manual[p] : (S.manual[p] = 1); S.fromHome = S.fromHome.filter(x => x !== p); }
+    else if (S.manual[p]) return openQty(p);  // уже в списке — спросим, сколько
+    else { S.manual[p] = 1; S.fromHome = S.fromHome.filter(x => x !== p); delete S.bought[p]; }
     haptic(); save(); renderAddResults(); },
+  qty: el => openQty(el.dataset.x),
+  qUnit: el => { const o = unitOptions(qd.pid), old = o[qd.u][1]; qd.u = +el.dataset.x; qd.val = roundNice(qd.val * old / o[qd.u][1]); renderQty(); },
+  qStep: el => { const st = qtyStep(unitOptions(qd.pid)[qd.u][1]); qd.val = Math.max(0, roundNice(readQty() + st * +el.dataset.x)); renderQty(); },
+  qPreset: el => { qd.val = +el.dataset.x; renderQty(); },
+  qSave: () => { const v = readQty(), f = unitOptions(qd.pid)[qd.u][1];
+    if (v > 0) { S.amount[qd.pid] = v * f; if (!buildList().buy[qd.pid]) S.manual[qd.pid] = S.manual[qd.pid] || 1; } else delete S.amount[qd.pid];
+    closeMini(); afterQty(); },
+  qClear: () => { const l = buildList().buy[qd.pid];
+    delete S.amount[qd.pid]; if (l && l.dishes.length) delete S.manual[qd.pid];  // «как в рецепте» — без ручной добавки
+    closeMini(); afterQty(); },
+  qRemove: () => { delete S.amount[qd.pid]; delete S.manual[qd.pid]; delete S.checked[qd.pid]; closeMini(); afterQty(); },
   addFree: () => { const q = sheet.q.trim().toLowerCase(); if (!q) return;
     if (sheet.target === "fridge") S.fridge[q] = Date.now(); else S.manual[q] = 1;
     sheet.q = ""; $("add-q").value = ""; haptic(); save(); renderAddResults(); },
@@ -1127,7 +1234,7 @@ const ACT = {
   finish: () => { const any = Object.keys(buildList().buy).some(p => S.checked[p]);
     if (!any) return toast("Отметьте, что купили, — потом «Завершить»");
     confirmBox("Завершить покупки? Купленное уйдёт в историю, не купленное останется в списке.", finishTrip); },
-  reset: () => confirmBox("Очистить список без сохранения?", () => { Object.assign(S, {dishes: [], manual: {}, fromHome: [], checked: {}, bought: {}}); render(); }),
+  reset: () => confirmBox("Очистить список без сохранения?", () => { Object.assign(S, {dishes: [], manual: {}, fromHome: [], checked: {}, bought: {}, amount: {}}); render(); }),
   share: () => { if (!S.dishes.length && !Object.keys(S.manual).length) return toast("Список пуст"); openSheet({kind: "share"}); },
   sendTg: () => { const {link, msg} = shareData(); const url = "https://t.me/share/url?url=" + encodeURIComponent(link) + "&text=" + encodeURIComponent(msg);
     tg ? tg.openTelegramLink(url) : window.open(url, "_blank"); },
@@ -1175,7 +1282,7 @@ const ACT = {
   onbBack: () => { onbStep = Math.max(0, onbStep - 1); renderOnb(); },
   onbSkip: () => finishOnb(),
   repeat: el => { const t = S.trips[+el.dataset.x];
-    const go = () => { S.dishes = t.dishes.map(d => [...d]); S.manual = {...(t.manual || Object.fromEntries(t.items.map(([p]) => [p, 1])))}; S.checked = {}; S.fromHome = []; S.bought = {}; showTab("list"); toast("Список восстановлен"); };
+    const go = () => { S.dishes = t.dishes.map(d => [...d]); S.manual = {...(t.manual || Object.fromEntries(t.items.map(([p]) => [p, 1])))}; S.checked = {}; S.fromHome = []; S.bought = {}; S.amount = {...(t.amount || {})}; showTab("list"); toast("Список восстановлен"); };
     S.dishes.length || Object.keys(S.manual).length ? confirmBox("Заменить текущий список этим?", go) : go(); },
   rmTrip: el => confirmBox("Удалить эту запись?", () => { S.trips.splice(+el.dataset.x, 1); render(); }),
 };
