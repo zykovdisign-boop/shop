@@ -6,7 +6,7 @@
 <title>Что купить</title>
 <meta name="description" content="Список покупок, который собирается сам: блюда, продукты по отделам, примерная сумма, рецепты и ваш холодильник.">
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
-<script src="data.js"></script>
+<script src="data.js?v=d358b4da"></script>
 <style>
 :root {
   --bg: var(--tg-theme-bg-color, #ffffff);
@@ -282,7 +282,7 @@ const KEY = "shoplist.v1";
 const blank = () => ({
   v: 3, onboarded: false, people: 4, prefs: {diets: [], fish: false}, theme: "auto", showPrices: true, autoFridge: true,
   dishes: [], manual: {}, fromHome: [], checked: {}, order: CATS.map((_, i) => i), history: {},
-  trips: [], myPrices: {}, custom: {}, customProducts: {}, fridge: {}, bought: {}, amount: {}, lastQ: "", lastShare: "",
+  trips: [], myPrices: {}, custom: {}, customProducts: {}, fridge: {}, bought: {}, amount: {}, lastQ: "", lastShare: "", lastAdd: "",
 });
 let S = blank();
 try { S = Object.assign(blank(), JSON.parse(localStorage.getItem(KEY) || "{}")); } catch (e) {}
@@ -372,6 +372,14 @@ const UNIT_WORDS = "кг|килограмм[а-яё]*|кило|г|гр|грам�
 const NUM_RE = new RegExp(`(?:(?:^|\\s)на\\s+)?(\\d+(?:[.,]\\d+)?)\\s*(${UNIT_WORDS})?(?![а-яё])`, "i");
 const PEOPLE_UNITS = /^(человек|чел|порц|персон|гост)/i;
 const HALVES = [[/полкило/gi, "0.5 кг"], [/пол\s*литра/gi, "0.5 л"], [/пол\s*кг/gi, "0.5 кг"]];
+const NUMBER_WORDS = {"ноль":0,"один":1,"одна":1,"одно":1,"два":2,"две":2,"три":3,"четыре":4,"пять":5,"шесть":6,"семь":7,"восемь":8,"девять":9,"десять":10,"одиннадцать":11,"двенадцать":12,"тринадцать":13,"четырнадцать":14,"пятнадцать":15,"шестнадцать":16,"семнадцать":17,"восемнадцать":18,"девятнадцать":19,"двадцать":20,"тридцать":30,"сорок":40,"пятьдесят":50,"шестьдесят":60,"семьдесят":70,"восемьдесят":80,"девяносто":90,"сто":100,"двести":200,"триста":300,"четыреста":400,"пятьсот":500,"шестьсот":600,"семьсот":700,"восемьсот":800,"девятьсот":900,"полтора":1.5,"полторы":1.5};
+/* «два литра молока», «триста пятьдесят грамм» → цифры (так диктует клавиатура телефона) */
+function wordsToDigits(text) {
+  const names = Object.keys(NUMBER_WORDS).sort((a, b) => b.length - a.length).join("|");
+  text = text.replace(new RegExp(`(?<![а-яё])(?:${names})(?:\\s+(?:${names}))*(?![а-яё])`, "gi"),
+    m => String(m.toLowerCase().replace(/ё/g, "е").split(/\s+/).reduce((s, w) => s + NUMBER_WORDS[w], 0)));
+  return text.replace(/(^|[^\d\s])(\s*)десят(ок|ка)(?![а-яё])/gi, "$1$21 десяток");
+}
 /* сколько продукта в единицах каталога: {qty} или {count} (штук/упаковок, если единица к товару не подходит) */
 function toBase(pid, n, unit) {
   const [pu, pack] = product(pid), u = (unit || "").toLowerCase().replace(/\.$/, ""), weight = pu === "г" || pu === "мл";
@@ -390,6 +398,7 @@ function toBase(pid, n, unit) {
 }
 function parseRequest(text, def) {
   for (const [re, to] of HALVES) text = text.replace(re, to);
+  text = wordsToDigits(text);
   text = text.replace(/[А-Яа-яЁё]+/g, w => WORD_NUMS[w.toLowerCase()] ?? w);
   const parts = [];
   for (let ch of text.split(/(?<!\d),|,(?!\d)|[;\n+]|\s+и\s+|\s+ещё\s+|\s+еще\s+/)) {  // «1,5 кг» не режем
@@ -1349,6 +1358,28 @@ async function maybeInterstitial() {
   } catch (e) { /* реклама не загрузилась — не мешаем */ }
 }
 
+/* ===================== ИЗ БОТА: ФОТО ЧЕКА ИЛИ ХОЛОДИЛЬНИКА =====================
+   ?add=… : f — продукты в холодильник, p — цены из чека [продукт, цена], r — это чек (купленное вычеркнуть из списка) */
+function importAdd(code) {
+  let o;
+  try { o = JSON.parse(unb64u(code)); } catch (e) { toast("Не получилось прочитать данные из бота"); return null; }
+  const key = k => typeof k === "number" ? PROD_BY_ID[k] : k;
+  const now = Date.now(), {buy} = buildList();
+  let nf = 0, np = 0, nc = 0;
+  for (const k of o.f || []) {
+    const pid = key(k); if (!pid) continue;
+    if (!NOT_FOOD.has(CATS[product(pid)[4]])) { S.fridge[pid] = now; nf++; }
+    if (o.r && buy[pid] && !S.checked[pid]) { S.checked[pid] = true; nc++; }
+  }
+  for (const [k, price] of o.p || []) { const pid = key(k); if (pid && price > 0) { S.myPrices[pid] = price; np++; } }
+  const parts = [];
+  if (nf) parts.push(`в холодильнике +${nf}`);
+  if (np) parts.push(`цен обновлено: ${np}`);
+  if (nc) parts.push(`отмечено купленным: ${nc}`);
+  toast(parts.length ? "Готово: " + parts.join(", ") : "Нечего добавлять");
+  return nc ? "list" : nf ? "fridge" : "list";
+}
+
 /* ===================== СТАРТ ===================== */
 registerCustom();
 $("plist").innerHTML = Object.keys(DB.products).map(p => `<option value="${esc(p)}">`).join("");
@@ -1357,7 +1388,10 @@ const params = new URLSearchParams(location.search);
 const incoming = params.get("q");
 if (incoming && incoming !== S.lastQ) { S.lastQ = incoming; addText(incoming); }  // пришли из бота с готовым запросом — дописываем в список
 const shared = (tg && tg.initDataUnsafe && tg.initDataUnsafe.start_param) || params.get("tgWebAppStartParam") || params.get("l");
-showTab("list");
+let startTab = "list";
+const fromBot = params.get("add");
+if (fromBot && fromBot !== S.lastAdd) { S.lastAdd = fromBot; S.onboarded = true; startTab = importAdd(fromBot) || "list"; }
+showTab(startTab);
 if (shared && shared[0] === "L" && shared !== S.lastShare) { S.onboarded = true; importShared(shared); }
 else if (!S.onboarded) { showOnb(); if (!S.dishes.length) cloudRestore(); }
 </script>
