@@ -251,6 +251,10 @@ nav button.on { color: var(--accent); font-weight: 600; }
    Пусто — отправляется ссылка на сайт приложения, тоже работает. */
 const APP = { botUsername: "", appName: "" };
 
+/* ===================== ОБЩИЙ СПИСОК ДЛЯ СЕМЬИ =====================
+   Адрес развёрнутого Apps Script (sync/УСТАНОВКА.md). Пусто — общего списка нет, всё живёт только в телефоне. */
+const SYNC_URL_DEFAULT = "https://script.google.com/macros/s/AKfycbzdWddbbaN3lv3Q5ScEdsNnV9AmhP1JOSLwIb2Dlf-toRoWDRvs2BoXrcK7IjHOfnGC/exec";
+
 /* ===================== НАСТРОЙКИ РЕКЛАМЫ =====================
    adsgramBlockId  — блок Adsgram (adsgram.ai), только внутри Telegram
    yandexBlockId   — блок РСЯ (partner.yandex.ru), когда открыто как сайт
@@ -291,7 +295,7 @@ S.dishes = S.dishes.map(d => [d[0], d[1], d[2] || 0]);
 if (!S.v || S.v < 2) S.onboarded = S.dishes.length > 0;
 S.v = 3;
 function save() {
-  try { localStorage.setItem(KEY, JSON.stringify(S)); cloudSaveSoon(); return true; }
+  try { localStorage.setItem(KEY, JSON.stringify(S)); cloudSaveSoon(); syncLocal(); return true; }
   catch (e) { toast("Не хватает места в памяти — удалите пару фото из своих рецептов"); return false; }
 }
 
@@ -561,7 +565,7 @@ function itemHtml(l) {
     : done ? "" : `<button class="qbtn ask" data-a="qty" data-x="${esc(l.pid)}">сколько?</button>`;
   return `<div class="item ${done ? "done" : ""}"><button class="box" data-a="check" data-x="${esc(l.pid)}" aria-label="Купил">${done ? "✓" : ""}</button>
     <div class="t"><button class="n" data-a="check" data-x="${esc(l.pid)}">${esc(cap(l.pid))}</button> ${qb}
-    ${l.dishes.length ? `<div class="for">${esc(l.dishes.join(", "))}</div>` : ""}</div>${price}</div>`;
+    ${l.dishes.length ? `<div class="for">${esc(l.dishes.join(", "))}</div>` : ""}${whoHtml("manual:" + l.pid)}</div>${price}</div>`;
 }
 function renderList() {
   const {buy, home, suggest, total} = buildList();
@@ -571,16 +575,16 @@ function renderList() {
   $("badge").hidden = !left; $("badge").textContent = left;
   $("share-btn").hidden = !n;
   if (!n && !S.dishes.length) {
-    $("list-body").innerHTML = `<div class="empty-state"><div class="big">🛒</div><h2 style="margin:10px 0 0">Список пуст</h2>
+    $("list-body").innerHTML = familyBar() + `<div class="empty-state"><div class="big">🛒</div><h2 style="margin:10px 0 0">Список пуст</h2>
       <p>Нажмите <b style="color:var(--accent)">+</b> и добавьте блюда или продукты. Записывайте в течение дня — список сохранится, а вечером купите всё за один заход.</p></div><div class="ad" id="ad-top"></div>`;
     renderAds(); return;
   }
   const doneCost = done.reduce((s, l) => s + lineCost(l), 0);
-  let html = S.showPrices && total ? `<div class="total">≈ ${rub(total)}</div><p class="sub" style="margin:0">Куплено ${done.length} из ${n}${done.length ? ` · осталось ≈ ${rub(total - doneCost)}` : ""}</p>` : `<p class="sub" style="margin:0">Куплено ${done.length} из ${n}</p>`;
+  let html = familyBar() + (S.showPrices && total ? `<div class="total">≈ ${rub(total)}</div><p class="sub" style="margin:0">Куплено ${done.length} из ${n}${done.length ? ` · осталось ≈ ${rub(total - doneCost)}` : ""}</p>` : `<p class="sub" style="margin:0">Куплено ${done.length} из ${n}</p>`);
   html += `<div class="progress"><i style="width:${n ? done.length / n * 100 : 0}%"></i></div>`;
   if (S.dishes.length) {
     html += `<div class="card"><h2>Меню</h2>${S.dishes.map(([name, cnt, v], i) => `<div class="drow">${thumb(name, "sm")}
-      <button class="name" data-a="recipe" data-x="${esc(name)}"><b>${esc(dishTitle(name, v))}</b></button>
+      <button class="name" data-a="recipe" data-x="${esc(name)}"><b>${esc(dishTitle(name, v))}</b>${whoHtml("dishes:" + name)}</button>
       <span class="stepper"><button data-a="serv" data-x="${i}" data-y="-1">−</button><span>${cnt}</span><button data-a="serv" data-x="${i}" data-y="1">+</button></span>
       <button class="rm" data-a="rmDish" data-x="${i}" aria-label="Убрать">×</button></div>`).join("")}</div>`;
   }
@@ -881,7 +885,8 @@ const THEMES = [["auto", "Как в системе"], ["light", "Светлая"
 function settingsHtml() {
   const mine = Object.keys(S.myPrices).length;
   return `<button class="close" data-a="closeSheet" aria-label="Закрыть">×</button><div class="in">
-    <h1>Настройки</h1><p class="sub">Всё хранится у вас.</p>
+    <h1>Настройки</h1><p class="sub">${famOn() ? "Список и холодильник — общие с семьёй, остальное хранится у вас." : "Всё хранится у вас."}</p>
+    ${familyHtml()}
     <div class="card"><h2>Семья</h2><div class="row"><span>На сколько человек готовить</span><span class="stepper"><button data-a="people" data-x="-1">−</button><span>${S.people}</span><button data-a="people" data-x="1">+</button></span></div></div>
     <div class="card"><h2>Питание</h2><div class="chips">${dietChips()}</div>
       <p class="note">Например, «без свинины»: плов и котлеты по умолчанию будут из курицы или говядины.</p></div>
@@ -1037,7 +1042,7 @@ function cloudSaveSoon() { if (!cloud) return; clearTimeout(cloudTimer); cloudTi
 function cloudSave() {
   try {
     const custom = {}; for (const [k, v] of Object.entries(S.custom)) custom[k] = {...v, photo: ""};
-    const s = JSON.stringify({people: S.people, prefs: S.prefs, theme: S.theme, showPrices: S.showPrices, autoFridge: S.autoFridge, order: S.order, myPrices: S.myPrices,
+    const s = JSON.stringify({family: S.family, uid: S.uid, myName: S.myName, people: S.people, prefs: S.prefs, theme: S.theme, showPrices: S.showPrices, autoFridge: S.autoFridge, order: S.order, myPrices: S.myPrices,
       custom, customProducts: S.customProducts, trips: S.trips.slice(0, 15), history: S.history, fridge: S.fridge, amount: S.amount,
       dishes: S.dishes, manual: S.manual, onboarded: S.onboarded});
     const n = Math.ceil(s.length / 3800);
@@ -1304,6 +1309,7 @@ document.addEventListener("click", e => {
 document.addEventListener("input", e => {
   if (e.target.id === "add-q" && sheet) { sheet.q = e.target.value; renderAddResults(); return; }
   if (e.target.id === "rq") { renderRecipes(); return; }
+  if (e.target.id === "my-name") { S.myName = e.target.value.trim().slice(0, 30); save(); return; }
   const k = e.target.dataset.e;
   if (k && sheet && sheet.kind === "editor") {  // поля редактора — без перерисовки, чтобы не терять фокус
     const i = +e.target.dataset.i;
@@ -1380,6 +1386,204 @@ function importAdd(code) {
   return nc ? "list" : nf ? "fridge" : "list";
 }
 
+/* ===================== ОБЩИЙ СПИСОК: СИНХРОНИЗАЦИЯ =====================
+   Общее у семьи: блюда, продукты, количества, отметки «куплено», холодильник, история, рецепты из списка.
+   Каждое изменение превращается в маленькие операции и уходит на сервер; чужие изменения
+   приходят раз в несколько секунд. Если связи нет — операции копятся и уйдут позже. */
+const SYNC_URL = SYNC_URL_DEFAULT || (() => { try { return localStorage.getItem("shoplist.syncUrl") || ""; } catch (e) { return ""; } })();
+const SHARED = ["dishes", "manual", "amount", "checked", "fromHome", "bought", "fridge", "trips", "recipes"];
+const SYNC = {pending: S.pend || [], inflight: false, shadow: null, timer: null, status: "", lastChange: 0, lastSeen: 0};
+/* неотправленное храним в телефоне: закрыли приложение без связи — уйдёт при следующем открытии */
+function keepPending() { S.pend = SYNC.pending; try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} }
+if (!S.uid) S.uid = tg && tg.initDataUnsafe && tg.initDataUnsafe.user ? "tg" + tg.initDataUnsafe.user.id : "w" + Math.random().toString(36).slice(2, 12);
+const myName = () => S.myName || (tg && tg.initDataUnsafe && tg.initDataUnsafe.user && tg.initDataUnsafe.user.first_name) || "Без имени";
+function famOn() { return !!(SYNC_URL && S.family && S.family.id); }
+
+/* текущее состояние списка — в виде словарей, которые удобно сравнивать */
+function sharedSnap() {
+  const recipes = {};
+  for (const [n] of S.dishes) if (S.custom[n]) {
+    const units = {};
+    for (const [pid] of S.custom[n].items) if (S.customProducts[pid]) units[pid] = S.customProducts[pid];
+    recipes[n] = {...S.custom[n], photo: "", units};
+  }
+  return {
+    dishes: Object.fromEntries(S.dishes.map(([n, c, v]) => [n, [c, v || 0]])),
+    manual: {...S.manual}, amount: {...S.amount},
+    checked: Object.fromEntries(Object.entries(S.checked).filter(([, v]) => v)),
+    fromHome: Object.fromEntries(S.fromHome.map(p => [p, 1])),
+    bought: {...S.bought}, fridge: {...S.fridge},
+    trips: Object.fromEntries(S.trips.slice(0, 15).map(t => [String(t.t), t])),
+    recipes,
+  };
+}
+function diffOps(a, b) {
+  const ops = [], me = [S.uid, myName()];
+  for (const f of SHARED) {
+    const A = (a && a[f]) || {}, B = b[f] || {};
+    for (const k of Object.keys(B)) if (JSON.stringify(A[k]) !== JSON.stringify(B[k])) {
+      ops.push(["s", f, k, B[k]]);
+      if ((f === "manual" || f === "dishes") && !(k in A)) ops.push(["s", "by", f + ":" + k, me]);  // кто добавил
+    }
+    for (const k of Object.keys(A)) if (!(k in B)) {
+      ops.push(["d", f, k]);
+      if (f === "manual" || f === "dishes") ops.push(["d", "by", f + ":" + k]);
+    }
+  }
+  return ops;
+}
+function applyOps(doc, ops) {  // то же, что на сервере
+  for (const [kind, f, k, v] of ops) {
+    if (![...SHARED, "by"].includes(f)) continue;
+    if (!doc[f] || typeof doc[f] !== "object") doc[f] = {};
+    if (kind === "c") doc[f] = {};
+    else if (kind === "s") doc[f][k] = v;
+    else if (kind === "d") delete doc[f][k];
+  }
+  return doc;
+}
+/* общий список с сервера → в приложение */
+function applyDoc(doc) {
+  for (const [n, r] of Object.entries(doc.recipes || {})) if (!S.custom[n] && !DB.dishes[n]) {
+    S.custom[n] = {servings: r.servings, time: r.time || "", items: r.items || [], steps: r.steps || [], photo: ""};
+    Object.assign(S.customProducts, r.units || {});
+  }
+  registerCustom();
+  S.dishes = Object.entries(doc.dishes || {}).map(([n, [c, v]]) => [n, c, v || 0]);
+  S.manual = {...(doc.manual || {})}; S.amount = {...(doc.amount || {})}; S.checked = {...(doc.checked || {})};
+  S.fromHome = Object.keys(doc.fromHome || {}); S.bought = {...(doc.bought || {})}; S.fridge = {...(doc.fridge || {})};
+  const famTrips = Object.values(doc.trips || {}).sort((a, b) => b.t - a.t);
+  const oldest = famTrips.length ? famTrips[famTrips.length - 1].t : Infinity;
+  S.trips = [...famTrips, ...S.trips.filter(t => t.t < oldest)].slice(0, 60);  // старше общего окна — свои
+  S.by = doc.by || {}; S.members = doc.members || {};
+}
+async function api(body) {
+  const r = await fetch(SYNC_URL, {method: "POST", body: JSON.stringify({...body, uid: S.uid, name: myName()}), headers: {"Content-Type": "text/plain;charset=utf-8"}});
+  return r.json();
+}
+/* приняли ответ сервера: его версия + то, что мы ещё не успели отправить */
+function receive(r, fromPoll) {
+  if (!r || r.error) {
+    if (r && r.error === "no_family") { toast("Общий список удалён. Список остался у вас."); S.family = null; save(); render(); }
+    return;
+  }
+  const changed = r.doc && r.v !== S.family.v;
+  S.family.v = r.v;
+  if (!r.doc) return;
+  applyDoc(applyOps(JSON.parse(JSON.stringify(r.doc)), SYNC.pending));
+  SYNC.shadow = sharedSnap();
+  SYNC.lastSeen = Date.now();
+  if (changed) SYNC.lastChange = Date.now();
+  save();
+  if (sheet && sheet.kind === "add") renderAddResults(); else render();
+  if (fromPoll && changed) { haptic(); toast("Список обновился"); }
+}
+function syncLocal() {
+  if (!famOn() || !SYNC.shadow) return;
+  const cur = sharedSnap(), ops = diffOps(SYNC.shadow, cur);
+  if (!ops.length) return;
+  SYNC.pending.push(...ops); SYNC.shadow = cur; SYNC.lastChange = Date.now(); keepPending();
+  clearTimeout(SYNC.timer); SYNC.timer = setTimeout(flush, 700);
+}
+async function flush() {
+  if (!famOn() || SYNC.inflight || !SYNC.pending.length) return;
+  SYNC.inflight = true;
+  const sending = SYNC.pending.slice(0, 300);
+  try {
+    const r = await api({action: "ops", f: S.family.id, ops: sending});
+    if (!r.error) { SYNC.pending = SYNC.pending.slice(sending.length); keepPending(); }
+    setStatus("");
+    receive(r);
+  } catch (e) {
+    setStatus("offline");
+    clearTimeout(SYNC.timer); SYNC.timer = setTimeout(flush, 5000);
+  } finally {
+    SYNC.inflight = false;
+    if (SYNC.pending.length && SYNC.status !== "offline") { clearTimeout(SYNC.timer); SYNC.timer = setTimeout(flush, 300); }
+  }
+}
+async function poll() {
+  if (!famOn() || document.hidden || SYNC.inflight || SYNC.pending.length) return;
+  try {
+    const r = await fetch(`${SYNC_URL}?f=${S.family.id}&v=${S.family.v || 0}`).then(x => x.json());
+    setStatus(""); receive(r, true);
+  } catch (e) { setStatus("offline"); }
+}
+function setStatus(st) { if (SYNC.status !== st) { SYNC.status = st; if (tab === "list" && !sheet) renderList(); } }
+// чаще, пока в списке что-то меняется, реже — когда тихо
+(function loop() { const busy = Date.now() - SYNC.lastChange < 120000; setTimeout(() => { poll().finally(loop); }, busy ? 4000 : 10000); })();
+document.addEventListener("visibilitychange", () => { if (!document.hidden) { poll(); flush(); } });
+
+/* --- создать, пригласить, вступить, выйти --- */
+async function famCreate() {
+  if (!SYNC_URL) return;
+  toast("Создаю общий список…");
+  try {
+    const r = await api({action: "create", doc: sharedSnap()});
+    if (r.error) return toast(r.error === "too_many" ? "Слишком часто, попробуйте позже" : "Не получилось создать");
+    S.family = {id: r.id, v: r.v}; SYNC.pending = [];
+    receive(r); renderSheet(); famInvite();
+  } catch (e) { toast("Нет связи с сервером"); }
+}
+function famLink() {
+  const id = S.family.id;
+  return APP.botUsername ? `https://t.me/${APP.botUsername}${APP.appName ? "/" + APP.appName : ""}?startapp=F${id}` : `${location.origin}${location.pathname}?fam=${id}`;
+}
+function famInvite() {
+  const link = famLink(), msg = "Давай вести список покупок вместе: открой ссылку, и у нас будет один список на двоих. Что добавишь ты — сразу увижу я.";
+  const url = "https://t.me/share/url?url=" + encodeURIComponent(link) + "&text=" + encodeURIComponent(msg);
+  if (tg) tg.openTelegramLink(url); else if (navigator.share) navigator.share({text: msg + "\n" + link}).catch(() => {}); else copy(msg + "\n" + link, "Ссылка скопирована — отправьте её семье");
+}
+async function famJoin(id) {
+  if (!SYNC_URL || !/^[a-f0-9]{20}$/.test(id)) return;
+  if (S.family && S.family.id === id) return;
+  let r;
+  try { r = await fetch(`${SYNC_URL}?f=${id}&v=0`).then(x => x.json()); } catch (e) { return toast("Нет связи — попробуйте открыть ссылку позже"); }
+  if (!r || !r.doc) return toast("Такого общего списка уже нет");
+  const go = () => {
+    // своё, чего нет в общем списке, — добавим туда
+    const mine = sharedSnap(), add = [];
+    for (const op of diffOps({}, mine)) if (op[0] === "s" && !(r.doc[op[1]] && op[2] in r.doc[op[1]])) add.push(op);
+    S.family = {id, v: 0}; SYNC.pending = add;
+    receive(r); showTab("list"); flush();
+    const names = Object.values(r.doc.members || {}).map(m => m.name).filter(Boolean);
+    toast(`Готово, список общий${names.length ? ". Ещё в нём: " + names.join(", ") : ""} 👋`);
+  };
+  confirmBox(S.family ? "Перейти в другой общий список?" : "Вас пригласили вести общий список покупок. Присоединиться? Ваш текущий список тоже туда попадёт.", go);
+}
+function famLeave() {
+  confirmBox("Выйти из общего списка? Сам список останется у вас, но изменения семьи больше не будут приходить.", () => {
+    S.family = null; S.by = {}; S.members = {}; SYNC.pending = []; SYNC.shadow = null; keepPending(); save(); renderSheet(); render(); toast("Теперь список только ваш");
+  });
+}
+ACT.famCreate = famCreate; ACT.famInvite = famInvite; ACT.famLeave = famLeave;
+
+function others() { return Object.entries(S.members || {}).filter(([u]) => u !== S.uid).map(([, m]) => m.name); }
+function familyBar() {
+  if (!famOn()) return "";
+  const names = others();
+  const state = SYNC.status === "offline" ? `<span class="warn">нет связи — отправлю, когда появится</span>` : SYNC.pending.length ? "сохраняю…" : "всё сохранено";
+  return `<p class="sub" style="margin:0 0 6px">👨‍👩‍👧 Общий список · ${names.length ? esc(names.join(", ")) + " и вы" : "пока только вы"} · ${state}</p>`;
+}
+function whoHtml(key) {
+  const w = famOn() && S.by && S.by[key];
+  return w && w[0] !== S.uid ? `<div class="for">👤 ${esc(w[1])}</div>` : "";
+}
+function familyHtml() {
+  if (!SYNC_URL) return "";
+  const nameField = `<div class="h2" style="text-transform:none;letter-spacing:0;font-size:14px;margin-top:10px">Как вас подписывать</div>
+    <input class="field" id="my-name" value="${esc(S.myName || myName())}" placeholder="Маша" style="margin-bottom:10px">`;
+  if (!famOn()) return `<div class="card"><h2>Общий список с семьёй</h2>
+    <p class="note" style="margin-top:0">Один список на всех: кто-то дописал молоко — у остальных оно появилось через пару секунд. Купленное вычёркивается у всех, холодильник тоже общий.</p>
+    ${nameField}<button class="primary" data-a="famCreate">Создать общий список</button></div>`;
+  const names = others();
+  return `<div class="card"><h2>Общий список с семьёй</h2>
+    <p style="margin:0 0 6px">${names.length ? "Вместе с вами: " + esc(names.join(", ")) : "Пока только вы — пригласите семью"}</p>
+    ${nameField}
+    <div class="btns"><button class="primary" data-a="famInvite">Пригласить</button>
+    <button class="ghost danger" data-a="famLeave" style="padding:8px">Выйти из общего списка</button></div></div>`;
+}
+
 /* ===================== СТАРТ ===================== */
 registerCustom();
 $("plist").innerHTML = Object.keys(DB.products).map(p => `<option value="${esc(p)}">`).join("");
@@ -1392,8 +1596,11 @@ let startTab = "list";
 const fromBot = params.get("add");
 if (fromBot && fromBot !== S.lastAdd) { S.lastAdd = fromBot; S.onboarded = true; startTab = importAdd(fromBot) || "list"; }
 showTab(startTab);
+const famInviteId = params.get("fam") || (shared && shared[0] === "F" ? shared.slice(1) : "");
 if (shared && shared[0] === "L" && shared !== S.lastShare) { S.onboarded = true; importShared(shared); }
+else if (famInviteId) { S.onboarded = true; famJoin(famInviteId); }
 else if (!S.onboarded) { showOnb(); if (!S.dishes.length) cloudRestore(); }
+if (famOn()) { SYNC.shadow = sharedSnap(); SYNC.pending.length ? flush() : poll(); }  // уже в семье — отправить накопленное и подтянуть свежее
 </script>
 </body>
 </html>
