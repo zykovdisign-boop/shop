@@ -249,7 +249,7 @@ nav button.on { color: var(--accent); font-weight: 600; }
    Заполните, когда зарегистрируете мини-приложение в @BotFather (/newapp):
    ссылка получится t.me/<botUsername>/<appName>?startapp=… и откроется прямо в Telegram.
    Пусто — отправляется ссылка на сайт приложения, тоже работает. */
-const APP = { botUsername: "", appName: "" };
+const APP = { botUsername: "Pokupki_market_bot", appName: "" };
 
 /* ===================== ОБЩИЙ СПИСОК ДЛЯ СЕМЬИ =====================
    Адрес развёрнутого Apps Script (sync/УСТАНОВКА.md). Пусто — общего списка нет, всё живёт только в телефоне. */
@@ -1087,9 +1087,9 @@ function packList(withSteps = true) {
 }
 function shareData() {
   let code = packList(true), link;
-  if (APP.botUsername) {
+  if (APP.botUsername && APP.appName) {  // длинный список в /start не влезет (64 символа) — только через мини-приложение
     if (code.length > 512) code = packList(false);
-    if (code.length <= 512) link = `https://t.me/${APP.botUsername}${APP.appName ? "/" + APP.appName : ""}?startapp=${code}`;
+    if (code.length <= 512) link = `https://t.me/${APP.botUsername}/${APP.appName}?startapp=${code}`;
   }
   link ??= location.origin + location.pathname + "?l=" + packList(true);
   const names = S.dishes.map(d => dishTitle(d[0], d[2]) + " на " + d[1]);
@@ -1527,7 +1527,10 @@ async function famCreate() {
 }
 function famLink() {
   const id = S.family.id;
-  return APP.botUsername ? `https://t.me/${APP.botUsername}${APP.appName ? "/" + APP.appName : ""}?startapp=F${id}` : `${location.origin}${location.pathname}?fam=${id}`;
+  // через бота: /start F<id> → бот присылает кнопку, приложение открывается в Telegram (работает и без регистрации мини-приложения)
+  if (APP.botUsername && APP.appName) return `https://t.me/${APP.botUsername}/${APP.appName}?startapp=F${id}`;
+  if (APP.botUsername) return `https://t.me/${APP.botUsername}?start=F${id}`;
+  return `${location.origin}${location.pathname}?fam=${id}`;
 }
 function famInvite() {
   const link = famLink(), msg = "Давай вести список покупок вместе: открой ссылку, и у нас будет один список на двоих. Что добавишь ты — сразу увижу я.";
