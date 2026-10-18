@@ -940,12 +940,14 @@ function finishOnb() { S.onboarded = true; $("onb").hidden = true; S.dishes.forE
 
 /* ===================== СКОЛЬКО КУПИТЬ ===================== */
 /* единицы, подходящие товару: [название, сколько это в единицах каталога] */
+const UNIT_PLURAL = {"уп.": "упаковки", "пакет": "пакеты", "банка": "банки", "бутылка": "бутылки", "пачка": "пачки", "десяток": "десятки",
+  "головка": "головки", "пакетик": "пакетики", "плитка": "плитки", "сырок": "сырки", "бутыль": "бутыли"};
 function unitOptions(pid) {
   const [unit, pack, label] = product(pid), o = [];
   if (unit === "г") o.push(["кг", 1000], ["г", 1]);
   else if (unit === "мл") o.push(["л", 1000], ["мл", 1]);
-  else o.push([unit === "зуб" ? "зубчиков" : unit, 1]);
-  if (pack) o.push([label === "уп." ? "упаковок" : plural(5, label), pack]);
+  else o.push([unit === "зуб" ? "зубчики" : unit, 1]);
+  if (pack) o.push([UNIT_PLURAL[label] || label, pack]);
   return o;
 }
 const qtyStep = f => f === 1000 ? 0.5 : f === 1 && unitIsWeight ? 100 : 1;
@@ -958,15 +960,15 @@ function amountText(pid, q) {
   return fmtAmount(q, unit);
 }
 let qd = null;  // {pid, u — индекс единицы, val}
-function openQty(pid) {
+function openQty(pid, fresh = false) {
   const o = unitOptions(pid), [unit, pack] = product(pid), line = buildList().buy[pid];
   const cur = S.amount[pid] ?? (line && line.qty) ?? 0;
   // по умолчанию: развес — кг/л, фасованное — упаковки, штучное — штуки
   let u = 0;
-  if ((unit === "г" || unit === "мл" || product(pid)[2] === "головка") && pack) u = o.length - 1;
+  if (pack) u = o.length - 1;
   if ((unit === "г" || unit === "мл") && !pack && cur && cur < 1000) u = 1;
   const val = cur ? roundNice(cur / o[u][1]) : (o[u][1] === 1000 ? 1 : 1);
-  qd = {pid, u, val: pack && u === o.length - 1 && cur ? Math.max(1, Math.ceil(cur / pack - 0.05)) : val, recipe: line && line.dishes.length ? (line.recipe ?? line.qty) : 0};
+  qd = {pid, u, val: pack && u === o.length - 1 && cur ? Math.max(1, Math.ceil(cur / pack - 0.05)) : val, recipe: line && line.dishes.length ? (line.recipe ?? line.qty) : 0, fresh};
   $("mini").hidden = false; renderQty();
 }
 function readQty() { const el = $("qty-in"); return el ? parseFloat(el.value.replace(",", ".")) || 0 : qd.val; }
@@ -984,7 +986,7 @@ function renderQty() {
     ${o.length > 1 ? `<div class="seg" style="margin-bottom:10px">${o.map(([t], i) => `<button class="${i === u ? "on" : ""}" data-a="qUnit" data-x="${i}">${esc(t)}</button>`).join("")}</div>` : `<p class="muted" style="text-align:center;margin:0 0 10px">${esc(o[0][0])}</p>`}
     <div class="chips" style="justify-content:center;margin-bottom:14px">${presets.map(x => `<button class="chip ${x === val ? "on" : ""}" data-a="qPreset" data-x="${x}">${String(x).replace(".", ",")}</button>`).join("")}</div>
     <button class="primary" data-a="qSave">Готово</button>
-    <div class="row" style="margin:12px 0 4px">${S.amount[pid] != null ? `<button class="ghost" data-a="qClear">${recipe ? "Как в рецепте" : "Без количества"}</button>` : "<span></span>"}
+    <div class="row" style="margin:12px 0 4px">${S.amount[pid] != null ? `<button class="ghost" data-a="qClear">${recipe ? "Как в рецепте" : "Без количества"}</button>` : qd.fresh ? `<button class="ghost" data-a="closeMini">Без количества</button>` : "<span></span>"}
       ${manualOnly ? `<button class="ghost danger" data-a="qRemove">Убрать из списка</button>` : `<button class="ghost" data-a="closeMini">Отмена</button>`}</div></div>`;
 }
 function afterQty() { save(); if (sheet && sheet.kind === "add") renderAddResults(); else render(); }
@@ -1219,7 +1221,11 @@ const ACT = {
   addProd: el => { const p = el.dataset.x;
     if (sheet.target === "fridge") S.fridge[p] ? delete S.fridge[p] : (S.fridge[p] = Date.now());
     else if (S.manual[p]) return openQty(p);  // уже в списке — спросим, сколько
-    else { S.manual[p] = 1; S.fromHome = S.fromHome.filter(x => x !== p); delete S.bought[p]; }
+    else {
+      S.manual[p] = 1; S.fromHome = S.fromHome.filter(x => x !== p); delete S.bought[p];
+      haptic(); save(); renderAddResults();
+      return openQty(p, true);  // только что добавили — сразу «Сколько?»
+    }
     haptic(); save(); renderAddResults(); },
   qty: el => openQty(el.dataset.x),
   qUnit: el => { const o = unitOptions(qd.pid), old = o[qd.u][1]; qd.u = +el.dataset.x; qd.val = roundNice(qd.val * old / o[qd.u][1]); renderQty(); },
@@ -1234,7 +1240,8 @@ const ACT = {
   qRemove: () => { delete S.amount[qd.pid]; delete S.manual[qd.pid]; delete S.checked[qd.pid]; closeMini(); afterQty(); },
   addFree: () => { const q = sheet.q.trim().toLowerCase(); if (!q) return;
     if (sheet.target === "fridge") S.fridge[q] = Date.now(); else S.manual[q] = 1;
-    sheet.q = ""; $("add-q").value = ""; haptic(); save(); renderAddResults(); },
+    sheet.q = ""; $("add-q").value = ""; haptic(); save(); renderAddResults();
+    if (sheet.target !== "fridge") openQty(q, true); },
   toggleDish: el => { const name = el.dataset.x, i = inList(name);
     if (i >= 0) S.dishes.splice(i, 1); else S.dishes.push([name, S.people, fit(name).v]);
     haptic(); save(); if (sheet && sheet.kind === "add") renderAddResults(); else render();
