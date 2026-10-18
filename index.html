@@ -6,7 +6,7 @@
 <title>Что купить</title>
 <meta name="description" content="Список покупок, который собирается сам: блюда, продукты по отделам, примерная сумма, рецепты и ваш холодильник.">
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
-<script src="data.js?v=d358b4da"></script>
+<script src="data.js?v=aab59483"></script>
 <style>
 :root {
   --bg: var(--tg-theme-bg-color, #ffffff);
@@ -588,6 +588,17 @@ function renderList() {
       <span class="stepper"><button data-a="serv" data-x="${i}" data-y="-1">−</button><span>${cnt}</span><button data-a="serv" data-x="${i}" data-y="1">+</button></span>
       <button class="rm" data-a="rmDish" data-x="${i}" aria-label="Убрать">×</button></div>`).join("")}</div>`;
   }
+  const hl = Object.values(home);
+  if (hl.length) {
+    const fromFridge = hl.filter(l => S.fridge[l.pid]).length;
+    html += `<div class="card"><details class="fold" ${fromFridge ? "open" : ""}><summary><span>🧊 Уже есть дома · ${hl.length}</span><span class="muted small">${fromFridge ? "не покупаю" : "проверьте"}</span></summary>
+      <p class="note" style="margin:6px 0 2px">${fromFridge ? "Это есть в холодильнике, поэтому в список не попало. Не хватит — нажмите «нужно купить»." : "Соль, специи, масло — обычно есть. Нет — нажмите «нужно купить»."}</p>
+      <div>${hl.map(l => {
+      const [unit] = product(l.pid);
+      const amt = l.qty && (unit === "г" || unit === "мл") ? ` · нужно ${fmtAmount(l.qty, unit)}` : "";
+      return `<div class="home-item"><span>${esc(cap(l.pid))}<span class="muted small">${amt}${S.fridge[l.pid] ? " · 🧊" : ""}</span></span><button data-a="nohome" data-x="${esc(l.pid)}">нужно купить</button></div>`;
+    }).join("")}</div></details></div>`;
+  }
   html += `<div class="ad" id="ad-top"></div>`;
   for (const ci of S.order) {
     const ls = byCat[ci]; if (!ls) continue;
@@ -597,12 +608,6 @@ function renderList() {
   }
   if (!left && n) html += `<div class="card" style="text-align:center">Всё куплено 🎉<p class="note">Нажмите «Завершить покупки» — список уйдёт в историю${S.autoFridge ? ", а продукты — в холодильник" : ""}.</p></div>`;
   if (done.length) html += `<div class="card"><details class="fold"><summary><span>🧺 В корзине · ${done.length}</span><span class="muted">${S.showPrices && doneCost ? "≈ " + rub(doneCost) : ""}</span></summary><div style="margin-top:6px">${done.map(itemHtml).join("")}</div></details></div>`;
-  const hl = Object.values(home);
-  if (hl.length) html += `<div class="card"><details class="fold"><summary><span>🏠 Уже есть дома · ${hl.length}</span><span class="muted small">проверить</span></summary><div style="margin-top:6px">${hl.map(l => {
-      const [unit] = product(l.pid);
-      const amt = l.qty && (unit === "г" || unit === "мл") ? ` · ${fmtAmount(l.qty, unit)}` : "";
-      return `<div class="home-item"><span>${esc(cap(l.pid))}<span class="muted small">${amt}${S.fridge[l.pid] ? " · в холодильнике" : ""}</span></span><button data-a="nohome" data-x="${esc(l.pid)}">нет → купить</button></div>`;
-    }).join("")}</div></details></div>`;
   if (suggest.length) html += `<div class="card"><h2>Может пригодиться</h2><div class="chips">${suggest.map(pid => `<button class="chip" data-a="sug" data-x="${esc(pid)}">+ ${esc(pid)}</button>`).join("")}</div></div>`;
   html += `<div class="ad" id="ad-bottom"></div><div class="row" style="margin:4px 2px 0"><button class="ghost" data-a="finish">Завершить покупки</button><button class="ghost danger" data-a="reset">Очистить</button></div>`;
   $("list-body").innerHTML = html;
@@ -767,6 +772,31 @@ function dishAddRow(name, sub = "") {
   const right = i >= 0 ? `<span class="stepper"><button data-a="serv" data-x="${i}" data-y="-1">−</button><span>${S.dishes[i][1]}</span><button data-a="serv" data-x="${i}" data-y="1">+</button></span>`
     : `<button class="plus" data-a="toggleDish" data-x="${esc(name)}">+</button>`;
   return `<div class="drow">${thumb(name, "sm")}<span class="name"><b>${esc(name)}</b><small>${esc(sub || d[3])}</small></span>${right}</div>`;
+}
+
+/* «крыло куриное 2 кг» → «куриные крылья»: количество холодильнику не нужно, а продукт из каталога — нужен для подсказок */
+function fridgeKey(text) {
+  const r = parseRequest(text, 1);
+  if (r.products.length === 1 && !r.dishes.length) return r.products[0][0];
+  const bare = norm(text.replace(/\d+(?:[.,]\d+)?\s*(кг|г|гр|л|мл|шт|порц\S*|уп\S*)?/gi, " "));
+  const w = bare.split(" ");
+  for (let n = w.length; n > 0; n--) { const p = findProduct(w.slice(0, n).join(" ")); if (p) return p; }  // «индейка на фарш» → «индейка»
+  return bare || text.trim().toLowerCase();
+}
+function tidyFridge() {
+  for (const k of Object.keys(S.fridge)) {
+    if (DB.products[k] || S.customProducts[k]) continue;
+    const pid = fridgeKey(k);
+    if (pid !== k && DB.products[pid]) { S.fridge[pid] = S.fridge[pid] || S.fridge[k]; delete S.fridge[k]; }
+  }
+}
+
+/* добавили блюдо: если что-то из него уже в холодильнике — сказать прямо, иначе кажется, что продукты не добавились */
+function dishAddedToast(name) {
+  const d = dish(name); if (!d) return;
+  const v = (S.dishes.find(x => x[0] === name) || [])[2] || 0;
+  const have = dishItems(d, v).filter(([pid, q]) => q > 0 && S.fridge[pid] && !S.fromHome.includes(pid)).map(([pid]) => pid);
+  toast(have.length ? `${name}: ${have.length} ${plural(have.length, "продукт")} уже в холодильнике (${have.slice(0, 3).join(", ")}${have.length > 3 ? "…" : ""}) — их не покупаю` : `${name} — в списке`);
 }
 
 /* --- рецепт --- */
@@ -1213,7 +1243,7 @@ const ACT = {
   addEnter: () => {
     const q = sheet.q.trim(); if (!q) return;
     if (sheet.target === "fridge") {
-      for (const part of q.split(/[,;\n]|\s+и\s+/)) { const t = part.trim(); if (!t) continue; S.fridge[findProduct(t) || t.toLowerCase()] = Date.now(); }
+      for (const part of q.split(/(?<!\d),|,(?!\d)|[;\n]|\s+и\s+/)) { const t = part.trim(); if (t) S.fridge[fridgeKey(t)] = Date.now(); }
       toast("Добавлено в холодильник");
     } else addText(q);
     sheet.q = ""; $("add-q").value = ""; renderAddResults(); save();
@@ -1245,7 +1275,7 @@ const ACT = {
   toggleDish: el => { const name = el.dataset.x, i = inList(name);
     if (i >= 0) S.dishes.splice(i, 1); else S.dishes.push([name, S.people, fit(name).v]);
     haptic(); save(); if (sheet && sheet.kind === "add") renderAddResults(); else render();
-    if (i < 0 && !sheet) toast(`${name} — в списке`); },
+    if (i < 0) dishAddedToast(name); },
   people: el => { S.people = Math.max(1, Math.min(30, S.people + +el.dataset.x)); save(); refreshOpen(); },
   serv: el => { const x = S.dishes[+el.dataset.x]; x[1] = Math.max(1, Math.min(100, x[1] + +el.dataset.y)); save(); if (sheet && sheet.kind === "add") renderAddResults(); else render(); },
   rmDish: el => { S.dishes.splice(+el.dataset.x, 1); render(); },
@@ -1271,7 +1301,7 @@ const ACT = {
   rServ: el => { sheet.n = Math.max(1, Math.min(100, sheet.n + +el.dataset.x)); renderSheet(); },
   rAdd: () => { const i = inList(sheet.name);
     i >= 0 ? (S.dishes[i][1] = sheet.n, S.dishes[i][2] = sheet.v) : S.dishes.push([sheet.name, sheet.n, sheet.v]);
-    haptic(); toast(`${dishTitle(sheet.name, sheet.v)} — в списке`); closeSheet(); },
+    haptic(); const nm = sheet.name; closeSheet(); dishAddedToast(nm); },
   cooked: () => { const d = dish(sheet.name);
     for (const [pid] of dishItems(d, sheet.v)) if (!product(pid)[3]) delete S.fridge[pid];
     toast("Приятного аппетита! Продукты убраны из холодильника"); closeSheet(); },
@@ -1474,11 +1504,13 @@ function receive(r, fromPoll) {
     if (r && r.error === "no_family") { toast("Общий список удалён. Список остался у вас."); S.family = null; save(); render(); }
     return;
   }
+  if (r.v < (S.family.v || 0)) return;  // пришёл старый ответ (запрос ушёл раньше нашего изменения) — не откатываем список
   const changed = r.doc && r.v !== S.family.v;
   S.family.v = r.v;
   if (!r.doc) return;
   applyDoc(applyOps(JSON.parse(JSON.stringify(r.doc)), SYNC.pending));
   SYNC.shadow = sharedSnap();
+  tidyFridge();  // после снимка — чтобы исправленные названия ушли и на сервер
   SYNC.lastSeen = Date.now();
   if (changed) SYNC.lastChange = Date.now();
   save();
@@ -1493,6 +1525,7 @@ function syncLocal() {
   clearTimeout(SYNC.timer); SYNC.timer = setTimeout(flush, 700);
 }
 async function flush() {
+  SYNC.timer = null;
   if (!famOn() || SYNC.inflight || !SYNC.pending.length) return;
   SYNC.inflight = true;
   const sending = SYNC.pending.slice(0, 300);
@@ -1501,19 +1534,23 @@ async function flush() {
     if (!r.error) { SYNC.pending = SYNC.pending.slice(sending.length); keepPending(); }
     setStatus("");
     receive(r);
+    if (r.error) { clearTimeout(SYNC.timer); SYNC.timer = setTimeout(flush, 15000); return; }  // сервер не принял — не долбим его
   } catch (e) {
     setStatus("offline");
     clearTimeout(SYNC.timer); SYNC.timer = setTimeout(flush, 5000);
   } finally {
     SYNC.inflight = false;
-    if (SYNC.pending.length && SYNC.status !== "offline") { clearTimeout(SYNC.timer); SYNC.timer = setTimeout(flush, 300); }
+    if (SYNC.pending.length && SYNC.status !== "offline" && !SYNC.timer) SYNC.timer = setTimeout(flush, 300);
   }
 }
 async function poll() {
   if (!famOn() || document.hidden || SYNC.inflight || SYNC.pending.length) return;
   try {
-    const r = await fetch(`${SYNC_URL}?f=${S.family.id}&v=${S.family.v || 0}`).then(x => x.json());
-    setStatus(""); receive(r, true);
+    const before = SYNC.lastChange;
+    const r = await fetch(`${SYNC_URL}?f=${S.family.id}&v=${S.family.v || 0}&t=${Date.now()}`, {cache: "no-store"}).then(x => x.json());
+    setStatus("");
+    if (SYNC.lastChange !== before || SYNC.pending.length) return;  // пока ждали ответ, вы что-то поменяли — заберём в следующий раз
+    receive(r, true);
   } catch (e) { setStatus("offline"); }
 }
 function setStatus(st) { if (SYNC.status !== st) { SYNC.status = st; if (tab === "list" && !sheet) renderList(); } }
@@ -1596,6 +1633,7 @@ function familyHtml() {
 
 /* ===================== СТАРТ ===================== */
 registerCustom();
+tidyFridge();
 $("plist").innerHTML = Object.keys(DB.products).map(p => `<option value="${esc(p)}">`).join("");
 applyTheme();
 const params = new URLSearchParams(location.search);
